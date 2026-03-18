@@ -89,6 +89,29 @@ struct _MetaBackendClass
 
   gboolean (* is_lid_closed) (MetaBackend *backend);
 
+  gboolean (* grab_device) (MetaBackend *backend,
+                            int          device_id,
+                            uint32_t     timestamp);
+
+  gboolean (* ungrab_device) (MetaBackend *backend,
+                              int          device_id,
+                              uint32_t     timestamp);
+
+  void (* freeze_keyboard) (MetaBackend *backend,
+                            uint32_t     timestamp);
+
+  void (* unfreeze_keyboard) (MetaBackend *backend,
+                              uint32_t     timestamp);
+
+  void (* ungrab_keyboard) (MetaBackend *backend,
+                            uint32_t     timestamp);
+
+  void (* finish_touch_sequence) (MetaBackend          *backend,
+                                  ClutterEventSequence *sequence,
+                                  MetaSequenceState     state);
+
+  void (* select_stage_events) (MetaBackend *backend);
+
   void (* set_keymap_async) (MetaBackend           *backend,
                              MetaKeymapDescription *description,
                              xkb_layout_index_t     layout_index,
@@ -178,6 +201,17 @@ void meta_backend_reset_keymap_async (MetaBackend                *backend,
                                       gpointer                    user_data);
 
 gboolean meta_backend_is_lid_closed (MetaBackend *backend);
+
+gboolean meta_backend_grab_device (MetaBackend *backend,
+                                   int          device_id,
+                                   uint32_t     timestamp);
+gboolean meta_backend_ungrab_device (MetaBackend *backend,
+                                     int          device_id,
+                                     uint32_t     timestamp);
+
+void meta_backend_finish_touch_sequence (MetaBackend          *backend,
+                                         ClutterEventSequence *sequence,
+                                         MetaSequenceState     state);
 
 void meta_backend_set_client_pointer_constraint (MetaBackend *backend,
                                                  MetaPointerConstraint *constraint);
