@@ -9,7 +9,6 @@ cogl_pkg_deps = [
   gio_dep,
   gobject_dep,
   graphene_dep,
-  wayland_server_dep,
 ]
 
 cogl_pkg_private_deps = [
@@ -23,9 +22,26 @@ if have_profiler
   ]
 endif
 
+if have_wayland
+  cogl_pkg_deps += [
+    wayland_server_dep,
+  ]
+endif
+
 if have_egl
   cogl_pkg_deps += [
     egl_dep,
+  ]
+endif
+
+if have_x11
+  cogl_pkg_deps += [
+    x11_dep,
+  ]
+  cogl_pkg_private_deps += [
+    xext_dep,
+    xdamage_dep,
+    xrandr_dep,
   ]
 endif
 

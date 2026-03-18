@@ -43,4 +43,7 @@ CLUTTER_EXPORT
 void clutter_grab_dismiss (ClutterGrab *grab);
 
 CLUTTER_EXPORT
+ClutterGrabState clutter_grab_get_seat_state (ClutterGrab *grab);
+
+CLUTTER_EXPORT
 gboolean clutter_grab_is_revoked (ClutterGrab *grab);

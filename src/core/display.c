@@ -323,13 +323,18 @@ meta_display_class_init (MetaDisplayClass *klass)
    *
    * The ::modifiers-accelerator-activated signal will be emitted when
    * a special modifiers-only keybinding is activated.
+   *
+   * Returns: %TRUE means that the keyboard device should remain
+   *    frozen and %FALSE for the default behavior of unfreezing the
+   *    keyboard.
    */
   display_signals[MODIFIERS_ACCELERATOR_ACTIVATED] =
     g_signal_new ("modifiers-accelerator-activated",
                   G_TYPE_FROM_CLASS (klass),
                   G_SIGNAL_RUN_LAST,
-                  0, NULL, NULL, NULL,
-                  G_TYPE_NONE, 0);
+                  0,
+                  g_signal_accumulator_first_wins, NULL, NULL,
+                  G_TYPE_BOOLEAN, 0);
 
   display_signals[FOCUS_WINDOW] =
     g_signal_new ("focus-window",
@@ -2241,10 +2246,14 @@ meta_display_accelerator_deactivate (MetaDisplay           *display,
                  clutter_event_get_time (event));
 }
 
-void
+gboolean
 meta_display_modifiers_accelerator_activate (MetaDisplay *display)
 {
-  g_signal_emit (display, display_signals[MODIFIERS_ACCELERATOR_ACTIVATED], 0);
+  gboolean freeze;
+
+  g_signal_emit (display, display_signals[MODIFIERS_ACCELERATOR_ACTIVATED], 0, &freeze);
+
+  return freeze;
 }
 
 /**

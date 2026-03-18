@@ -65,6 +65,7 @@
 #include "backends/meta-input-mapper-private.h"
 #include "backends/meta-input-settings-private.h"
 #include "backends/meta-logical-monitor-private.h"
+#include "backends/meta-monitor-manager-dummy.h"
 #include "backends/meta-remote-access-controller-private.h"
 #include "backends/meta-renderdoc.h"
 #include "backends/meta-settings-private.h"
@@ -591,6 +592,30 @@ meta_backend_real_is_lid_closed (MetaBackend *backend)
   return priv->lid_is_closed;
 }
 
+static gboolean
+meta_backend_real_grab_device (MetaBackend *backend,
+                               int          device_id,
+                               uint32_t     timestamp)
+{
+  /* Do nothing */
+  return TRUE;
+}
+
+static gboolean
+meta_backend_real_ungrab_device (MetaBackend *backend,
+                                 int          device_id,
+                                 uint32_t     timestamp)
+{
+  /* Do nothing */
+  return TRUE;
+}
+
+static void
+meta_backend_real_select_stage_events (MetaBackend *backend)
+{
+  /* Do nothing */
+}
+
 static MetaCursorTracker *
 meta_backend_real_create_cursor_tracker (MetaBackend *backend)
 {
@@ -627,6 +652,36 @@ meta_backend_real_resume (MetaBackend *backend)
 #endif
   meta_renderer_resume (priv->renderer);
   clutter_actor_queue_redraw (CLUTTER_ACTOR (stage));
+}
+
+void
+meta_backend_freeze_keyboard (MetaBackend *backend,
+                              uint32_t     timestamp)
+{
+  g_return_if_fail (META_IS_BACKEND (backend));
+
+  if (META_BACKEND_GET_CLASS (backend)->freeze_keyboard)
+    META_BACKEND_GET_CLASS (backend)->freeze_keyboard (backend, timestamp);
+}
+
+void
+meta_backend_unfreeze_keyboard (MetaBackend *backend,
+                                uint32_t     timestamp)
+{
+  g_return_if_fail (META_IS_BACKEND (backend));
+
+  if (META_BACKEND_GET_CLASS (backend)->unfreeze_keyboard)
+    META_BACKEND_GET_CLASS (backend)->unfreeze_keyboard (backend, timestamp);
+}
+
+void
+meta_backend_ungrab_keyboard (MetaBackend *backend,
+                              uint32_t     timestamp)
+{
+  g_return_if_fail (META_IS_BACKEND (backend));
+
+  if (META_BACKEND_GET_CLASS (backend)->ungrab_keyboard)
+    META_BACKEND_GET_CLASS (backend)->ungrab_keyboard (backend, timestamp);
 }
 
 gboolean
@@ -827,6 +882,9 @@ meta_backend_class_init (MetaBackendClass *klass)
   object_class->get_property = meta_backend_get_property;
 
   klass->is_lid_closed = meta_backend_real_is_lid_closed;
+  klass->grab_device = meta_backend_real_grab_device;
+  klass->ungrab_device = meta_backend_real_ungrab_device;
+  klass->select_stage_events = meta_backend_real_select_stage_events;
   klass->create_cursor_tracker = meta_backend_real_create_cursor_tracker;
   klass->is_headless = meta_backend_real_is_headless;
   klass->pause = meta_backend_real_pause;
@@ -1650,6 +1708,31 @@ meta_backend_is_rendering_hardware_accelerated (MetaBackend *backend)
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
 
   return meta_renderer_is_hardware_accelerated (renderer);
+}
+
+gboolean
+meta_backend_grab_device (MetaBackend *backend,
+                          int          device_id,
+                          uint32_t     timestamp)
+{
+  return META_BACKEND_GET_CLASS (backend)->grab_device (backend, device_id, timestamp);
+}
+
+gboolean
+meta_backend_ungrab_device (MetaBackend *backend,
+                            int          device_id,
+                            uint32_t     timestamp)
+{
+  return META_BACKEND_GET_CLASS (backend)->ungrab_device (backend, device_id, timestamp);
+}
+
+void
+meta_backend_finish_touch_sequence (MetaBackend          *backend,
+                                    ClutterEventSequence *sequence,
+                                    MetaSequenceState     state)
+{
+  if (META_BACKEND_GET_CLASS (backend)->finish_touch_sequence)
+    META_BACKEND_GET_CLASS (backend)->finish_touch_sequence (backend, sequence, state);
 }
 
 /**
