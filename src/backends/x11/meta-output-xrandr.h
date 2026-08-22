@@ -34,7 +34,7 @@ G_DECLARE_FINAL_TYPE (MetaOutputXrandr, meta_output_xrandr,
 void meta_output_xrandr_apply_mode (MetaOutputXrandr *output_xrandr);
 
 void meta_output_xrandr_set_ctm (MetaOutputXrandr    *output_xrandr,
-                                 const MetaOutputCtm *ctm);
+                                 const MetaCtm *ctm);
 
 GBytes * meta_output_xrandr_read_edid (MetaOutput *output_xrandr);
 

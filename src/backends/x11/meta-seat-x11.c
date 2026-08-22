@@ -929,7 +929,7 @@ meta_seat_x11_handle_event_post (ClutterSeat        *seat,
       event_type != CLUTTER_DEVICE_REMOVED)
     return TRUE;
 
-  device = clutter_event_get_device (event);
+  device = clutter_event_get_source_device (event);
   type = clutter_input_device_get_device_type (device);
   is_touch = type == CLUTTER_TOUCHSCREEN_DEVICE;
   is_tablet_tool = type == CLUTTER_PEN_DEVICE || type == CLUTTER_ERASER_DEVICE;
