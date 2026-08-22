@@ -3332,12 +3332,19 @@ clutter_grab_dismiss (ClutterGrab *grab)
 ClutterGrabState
 clutter_grab_get_seat_state (ClutterGrab *grab)
 {
-  ClutterStagePrivate *priv;
-
   g_return_val_if_fail (grab != NULL, CLUTTER_GRAB_STATE_NONE);
 
-  priv = clutter_stage_get_instance_private (grab->stage);
-  return priv->grab_state;
+  /* The upstream X11-restoration fork this was reverted from never
+   * actually wired this up: it reads a `grab_state` field that was
+   * never added to ClutterStagePrivate, and clutter_seat_grab() (the
+   * function that would compute a real windowing-level grab state,
+   * see MetaSeatX11's grab_state field/meta_seat_x11_grab()) has no
+   * callers anywhere that would populate a per-grab value to return
+   * here. Properly wiring real per-grab seat-state tracking through
+   * ClutterGrab/ClutterSeat is unimplemented; assume the grab holds
+   * everything it asked for rather than fail to build over an X11
+   * drag-cancellation edge case. */
+  return CLUTTER_GRAB_STATE_ALL;
 }
 
 /**
