@@ -30,7 +30,6 @@ struct _MetaCursorTrackerX11
 {
   MetaCursorTracker parent;
 
-  gboolean is_force_track_position_enabled;
   guint update_position_timeout_id;
 
   MetaCursorSpriteXfixes *xfixes_cursor;
@@ -125,30 +124,21 @@ update_cursor_timeout (gpointer user_data)
   return G_SOURCE_CONTINUE;
 }
 
+/* MetaCursorTrackerClass::set_force_track_position doesn't exist any
+ * more - nothing outside this file ever called the generic public
+ * wrapper either, so the enable/disable toggle it existed for was never
+ * really used by anything but this backend. X11 has no push-based cursor
+ * position notification the way Wayland does, so it always needs to poll;
+ * simplified to just always run the timer from construction instead of
+ * being conditionally enabled via a vfunc. */
 static void
-meta_cursor_tracker_x11_set_force_track_position (MetaCursorTracker *tracker,
-                                                  gboolean           is_enabled)
+start_position_tracking (MetaCursorTrackerX11 *tracker_x11)
 {
-  MetaCursorTrackerX11 *tracker_x11 = META_CURSOR_TRACKER_X11 (tracker);
-
-  if (tracker_x11->is_force_track_position_enabled == is_enabled)
-    return;
-
-  tracker_x11->is_force_track_position_enabled = is_enabled;
-
-  if (is_enabled)
-    {
-      tracker_x11->update_position_timeout_id =
-        g_timeout_add (UPDATE_POSITION_TIMEOUT_MS,
-                       update_cursor_timeout,
-                       tracker_x11);
-      update_position (tracker_x11);
-    }
-  else
-    {
-      g_clear_handle_id (&tracker_x11->update_position_timeout_id,
-                         g_source_remove);
-    }
+  tracker_x11->update_position_timeout_id =
+    g_timeout_add (UPDATE_POSITION_TIMEOUT_MS,
+                   update_cursor_timeout,
+                   tracker_x11);
+  update_position (tracker_x11);
 }
 
 static ClutterCursor *
@@ -175,6 +165,19 @@ meta_cursor_tracker_x11_dispose (GObject *object)
 }
 
 static void
+meta_cursor_tracker_x11_constructed (GObject *object)
+{
+  MetaCursorTrackerX11 *tracker_x11 = META_CURSOR_TRACKER_X11 (object);
+
+  G_OBJECT_CLASS (meta_cursor_tracker_x11_parent_class)->constructed (object);
+
+  /* Only safe after chaining up: needs the "backend" construct property
+   * the parent class sets to already be in place (update_position() and
+   * the timeout it schedules both go through meta_cursor_tracker_get_backend()). */
+  start_position_tracking (tracker_x11);
+}
+
+static void
 meta_cursor_tracker_x11_init (MetaCursorTrackerX11 *tracker_x11)
 {
 }
@@ -185,10 +188,9 @@ meta_cursor_tracker_x11_class_init (MetaCursorTrackerX11Class *klass)
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
   MetaCursorTrackerClass *tracker_class = META_CURSOR_TRACKER_CLASS (klass);
 
+  object_class->constructed = meta_cursor_tracker_x11_constructed;
   object_class->dispose = meta_cursor_tracker_x11_dispose;
 
-  tracker_class->set_force_track_position =
-    meta_cursor_tracker_x11_set_force_track_position;
   tracker_class->get_sprite =
     meta_cursor_tracker_x11_get_sprite;
 }

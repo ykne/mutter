@@ -36,6 +36,11 @@ void meta_cursor_tracker_set_current_cursor (MetaCursorTracker *tracker,
 
 void meta_cursor_tracker_invalidate_position (MetaCursorTracker *tracker);
 
+/* Restored alongside the X11 backend: still used internally (still
+ * 'static' there), made non-static so the X11 tracker's XFixesCursorNotify
+ * handling can call it directly, same as before X11 support was removed. */
+void meta_cursor_tracker_notify_cursor_changed (MetaCursorTracker *tracker);
+
 MetaBackend * meta_cursor_tracker_get_backend (MetaCursorTracker *tracker);
 
 void meta_cursor_tracker_destroy (MetaCursorTracker *tracker);
