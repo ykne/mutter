@@ -603,7 +603,7 @@ _cogl_renderer_remove_native_filter (CoglRenderer         *renderer,
 }
 
 CoglFilterReturn
-_cogl_renderer_handle_native_event (CoglRenderer *renderer,
+cogl_renderer_handle_event (CoglRenderer *renderer,
                                     void         *event)
 {
   GList *l;
