@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <X11/Xlib.h>
+
 #include "backends/meta-cursor-tracker-private.h"
 
 #define META_TYPE_CURSOR_TRACKER_X11 (meta_cursor_tracker_x11_get_type ())

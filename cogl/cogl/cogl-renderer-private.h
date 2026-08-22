@@ -72,5 +72,5 @@ void _cogl_renderer_remove_native_filter (CoglRenderer         *renderer,
                                           CoglNativeFilterFunc  func,
                                           void                 *data);
 
-CoglFilterReturn _cogl_renderer_handle_native_event (CoglRenderer *renderer,
+CoglFilterReturn cogl_renderer_handle_event (CoglRenderer *renderer,
                                                      void         *event);

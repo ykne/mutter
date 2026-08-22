@@ -81,7 +81,7 @@ enum
 
 static guint signals[LAST_SIGNAL];
 
-static void
+void
 meta_cursor_tracker_notify_cursor_changed (MetaCursorTracker *tracker)
 {
   g_signal_emit (tracker, signals[CURSOR_CHANGED], 0);
