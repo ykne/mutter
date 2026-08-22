@@ -191,7 +191,7 @@ _cogl_onscreen_queue_dispatch_idle (CoglOnscreen *onscreen)
     }
 }
 
-static void
+void
 _cogl_onscreen_queue_dirty (CoglOnscreen       *onscreen,
                             const MtkRectangle *info)
 {
