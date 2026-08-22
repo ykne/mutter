@@ -670,28 +670,17 @@ meta_monitor_manager_dummy_calculate_supported_scales (MetaMonitorManager       
 static gboolean
 is_monitor_framebuffers_scaled (MetaMonitorManager *manager)
 {
-  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
-  MetaSettings *settings = meta_backend_get_settings (backend);
-
-  return meta_settings_is_experimental_feature_enabled (
-    settings,
-    META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER);
+  /* META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER doesn't exist
+   * upstream any more (MetaExperimentalFeature only has KMS_MODIFIERS
+   * and AUTOCLOSE_XWAYLAND left) - this dummy/headless-testing backend
+   * isn't used by a real X11 session, so just default to unscaled. */
+  return FALSE;
 }
 
 static MetaMonitorManagerCapability
 meta_monitor_manager_dummy_get_capabilities (MetaMonitorManager *manager)
 {
-  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
-  MetaSettings *settings = meta_backend_get_settings (backend);
-  MetaMonitorManagerCapability capabilities =
-    META_MONITOR_MANAGER_CAPABILITY_NONE;
-
-  if (meta_settings_is_experimental_feature_enabled (
-        settings,
-        META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER))
-    capabilities |= META_MONITOR_MANAGER_CAPABILITY_LAYOUT_MODE;
-
-  return capabilities;
+  return META_MONITOR_MANAGER_CAPABILITY_NONE;
 }
 
 static gboolean
