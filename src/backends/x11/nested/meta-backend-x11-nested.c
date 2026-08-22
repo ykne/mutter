@@ -22,6 +22,7 @@
 #include "backends/meta-monitor-manager-dummy.h"
 #include "backends/meta-stage-private.h"
 #include "backends/x11/meta-input-settings-x11.h"
+#include "meta/meta-keymap-description.h"
 #include "backends/x11/nested/meta-backend-x11-nested.h"
 #include "backends/x11/nested/meta-cursor-renderer-x11-nested.h"
 #include "backends/x11/nested/meta-renderer-x11-nested.h"
@@ -149,21 +150,10 @@ meta_backend_x11_nested_select_stage_events (MetaBackend *backend)
 }
 
 static void
-meta_backend_x11_nested_set_keymap_async (MetaBackend *backend,
-                                          const char  *layouts,
-                                          const char  *variants,
-                                          const char  *options,
-                                          const char  *model,
-                                          GTask       *task)
-{
-  g_task_return_boolean (task, TRUE);
-  g_object_unref (task);
-}
-
-static void
-meta_backend_x11_nested_set_keymap_layout_group_async (MetaBackend        *backend,
-                                                       xkb_layout_index_t  idx,
-                                                       GTask              *task)
+meta_backend_x11_nested_set_keymap_async (MetaBackend           *backend,
+                                          MetaKeymapDescription *description,
+                                          xkb_layout_index_t     layout_index,
+                                          GTask                 *task)
 {
   g_task_return_boolean (task, TRUE);
   g_object_unref (task);
@@ -292,7 +282,6 @@ meta_backend_x11_nested_class_init (MetaBackendX11NestedClass *klass)
   backend_class->update_stage = meta_backend_x11_nested_update_stage;
   backend_class->select_stage_events = meta_backend_x11_nested_select_stage_events;
   backend_class->set_keymap_async = meta_backend_x11_nested_set_keymap_async;
-  backend_class->set_keymap_layout_group_async = meta_backend_x11_nested_set_keymap_layout_group_async;
   backend_class->is_lid_closed = meta_backend_x11_nested_is_lid_closed;
   backend_class->set_pointer_constraint = meta_backend_x11_nested_set_pointer_constraint;
 

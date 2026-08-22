@@ -38,7 +38,6 @@
 #include "clutter/clutter-mutter.h"
 #include "cogl/cogl-mutter.h"
 #include "cogl/cogl.h"
-#include "cogl/cogl-x11-onscreen.h"
 #include "cogl/winsys/cogl-onscreen-xlib.h"
 #include "core/display-private.h"
 #include "meta/meta-context.h"
