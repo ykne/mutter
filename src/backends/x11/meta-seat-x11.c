@@ -602,7 +602,6 @@ create_device (MetaSeatX11    *seat_x11,
   ClutterInputDeviceType source, touch_source;
   ClutterInputCapabilities capabilities = 0;
   ClutterInputDevice *retval;
-  ClutterInputMode mode;
   uint32_t num_touches = 0, num_rings = 0, num_strips = 0;
   guint vendor_id = 0, product_id = 0;
   char *node_path = NULL;
@@ -665,23 +664,11 @@ create_device (MetaSeatX11    *seat_x11,
       g_free (name);
     }
 
-  switch (info->use)
-    {
-    case XIMasterKeyboard:
-    case XIMasterPointer:
-      mode = CLUTTER_INPUT_MODE_LOGICAL;
-      break;
-
-    case XISlaveKeyboard:
-    case XISlavePointer:
-      mode = CLUTTER_INPUT_MODE_PHYSICAL;
-      break;
-
-    case XIFloatingSlave:
-    default:
-      mode = CLUTTER_INPUT_MODE_FLOATING;
-      break;
-    }
+  /* Used to also record a CLUTTER_INPUT_MODE_LOGICAL/PHYSICAL/FLOATING
+   * classification here (from info->use: XIMaster*/XISlave*/XIFloatingSlave)
+   * and pass it via a "device-mode" construct property, but neither
+   * ClutterInputMode nor that property exist any more - dropped along
+   * with the rest of X11 support, with nothing replacing the concept. */
 
   if (info->use != XIMasterKeyboard &&
       info->use != XIMasterPointer)
@@ -717,7 +704,6 @@ create_device (MetaSeatX11    *seat_x11,
                          "has-cursor", (info->use == XIMasterPointer),
                          "device-type", source,
                          "capabilities", capabilities,
-                         "device-mode", mode,
                          "vendor-id", vendor_id,
                          "product-id", product_id,
                          "device-node", node_path,
@@ -1673,22 +1659,6 @@ meta_seat_x11_finalize (GObject *object)
   G_OBJECT_CLASS (meta_seat_x11_parent_class)->finalize (object);
 }
 
-static ClutterInputDevice *
-meta_seat_x11_get_pointer (ClutterSeat *seat)
-{
-  MetaSeatX11 *seat_x11 = META_SEAT_X11 (seat);
-
-  return seat_x11->core_pointer;
-}
-
-static ClutterInputDevice *
-meta_seat_x11_get_keyboard (ClutterSeat *seat)
-{
-  MetaSeatX11 *seat_x11 = META_SEAT_X11 (seat);
-
-  return seat_x11->core_keyboard;
-}
-
 static const GList *
 meta_seat_x11_peek_devices (ClutterSeat *seat)
 {
@@ -1978,8 +1948,6 @@ meta_seat_x11_class_init (MetaSeatX11Class *klass)
   object_class->constructed = meta_seat_x11_constructed;
   object_class->finalize = meta_seat_x11_finalize;
 
-  seat_class->get_pointer = meta_seat_x11_get_pointer;
-  seat_class->get_keyboard = meta_seat_x11_get_keyboard;
   seat_class->peek_devices = meta_seat_x11_peek_devices;
   seat_class->bell_notify = meta_seat_x11_bell_notify;
   seat_class->get_keymap = meta_seat_x11_get_keymap;

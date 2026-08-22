@@ -390,7 +390,14 @@ is_scaling_changed (MetaMonitorManager  *manager,
   capabilities = meta_monitor_manager_get_capabilities (manager);
   g_assert (capabilities & META_MONITOR_MANAGER_CAPABILITY_GLOBAL_SCALE_REQUIRED);
 
-  global_scale = meta_monitor_manager_derive_configured_global_scale (manager, config);
+  /* meta_monitor_manager_derive_configured_global_scale() doesn't exist
+   * any more (removed with the rest of X11 support - GLOBAL_SCALE_REQUIRED
+   * mode itself is still supported, just not this specific helper). Under
+   * that capability every logical monitor necessarily shares one scale,
+   * so just read it off the first configured logical monitor directly. */
+  g_assert (config->logical_monitor_configs != NULL);
+  global_scale =
+    ((MetaLogicalMonitorConfig *) config->logical_monitor_configs->data)->scale;
 
   for (l = manager->logical_monitors; l; l = l->next)
     {
@@ -624,7 +631,7 @@ meta_monitor_manager_xrandr_ensure_initial_config (MetaMonitorManager *manager)
   meta_monitor_manager_read_current_state (manager);
 
   config = meta_monitor_config_manager_get_current (config_manager);
-  meta_monitor_manager_update_logical_state_derived (manager, config, NULL);
+  meta_monitor_manager_update_logical_state (manager, config, NULL);
 }
 
 static gboolean
@@ -641,7 +648,7 @@ meta_monitor_manager_xrandr_apply_monitors_config (MetaMonitorManager      *mana
       if (!manager->in_init)
         apply_crtc_assignments (manager, TRUE, NULL, 0, NULL, 0);
 
-      meta_monitor_manager_rebuild_derived (manager, NULL);
+      meta_monitor_manager_rebuild (manager, NULL);
       return TRUE;
     }
 
@@ -677,7 +684,7 @@ meta_monitor_manager_xrandr_apply_monitors_config (MetaMonitorManager      *mana
 
       if (is_scaling_changed (manager, config))
         {
-          meta_monitor_manager_rebuild_derived (manager, config);
+          meta_monitor_manager_rebuild (manager, config);
         }
     }
 
@@ -1041,7 +1048,7 @@ meta_monitor_manager_xrandr_handle_xevent (MetaMonitorManagerXrandr *manager_xra
           config = NULL;
         }
 
-      meta_monitor_manager_rebuild_derived (manager, config);
+      meta_monitor_manager_rebuild (manager, config);
     }
 
   return TRUE;
