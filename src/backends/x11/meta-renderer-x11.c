@@ -37,44 +37,9 @@
 #include "meta/meta-backend.h"
 #include "meta/util.h"
 
-#ifdef HAVE_EGL
 #include "cogl/winsys/cogl-winsys-egl-x11-private.h"
-#endif
-#ifdef HAVE_GLX
-#include "cogl/winsys/cogl-winsys-glx-private.h"
-#endif
 
 G_DEFINE_TYPE (MetaRendererX11, meta_renderer_x11, META_TYPE_RENDERER)
-
-static const CoglWinsysVtable *
-get_x11_cogl_winsys_vtable (CoglRenderer *renderer)
-{
-#ifdef HAVE_EGL_PLATFORM_XLIB
-  if (meta_is_wayland_compositor ())
-    return _cogl_winsys_egl_xlib_get_vtable ();
-#endif
-
-  switch (cogl_renderer_get_driver_id (renderer))
-    {
-    case COGL_DRIVER_ID_GLES2:
-#ifdef HAVE_EGL_PLATFORM_XLIB
-      return _cogl_winsys_egl_xlib_get_vtable ();
-#else
-      break;
-#endif
-    case COGL_DRIVER_ID_GL3:
-#ifdef HAVE_GLX
-      return _cogl_winsys_glx_get_vtable ();
-#else
-      break;
-#endif
-    case COGL_DRIVER_ID_ANY:
-    case COGL_DRIVER_ID_NOP:
-      break;
-    }
-  g_assert_not_reached ();
-  return NULL;
-}
 
 static CoglRenderer *
 meta_renderer_x11_create_cogl_renderer (MetaRenderer *renderer)
@@ -83,10 +48,19 @@ meta_renderer_x11_create_cogl_renderer (MetaRenderer *renderer)
   MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
   Display *xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
   CoglRenderer *cogl_renderer;
+  CoglWinsys *winsys;
+
+  /* GLX support isn't built (-Dglx=false): EGL-over-Xlib is the only
+   * X11 rendering backend, so instantiate it unconditionally instead
+   * of dispatching on cogl_renderer_get_driver_id() /
+   * meta_is_wayland_compositor() the way upstream historically did
+   * when both backends were selectable. */
+  winsys = g_object_new (COGL_TYPE_WINSYS_EGL_X11,
+                         "name", "EGL_XLIB",
+                         NULL);
 
   cogl_renderer = cogl_renderer_new ();
-  cogl_renderer_set_custom_winsys (cogl_renderer, get_x11_cogl_winsys_vtable,
-                                   NULL);
+  cogl_renderer_set_custom_winsys (cogl_renderer, winsys);
   cogl_xlib_renderer_set_foreign_display (cogl_renderer, xdisplay);
 
   return cogl_renderer;
