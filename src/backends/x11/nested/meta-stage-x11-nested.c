@@ -32,6 +32,7 @@
 #include "backends/meta-renderer.h"
 #include "backends/x11/nested/meta-renderer-x11-nested.h"
 #include "clutter/clutter-mutter.h"
+#include "cogl/cogl-frame-info-private.h"
 
 struct _MetaStageX11Nested
 {
@@ -178,9 +179,10 @@ meta_stage_x11_nested_finish_frame (ClutterStageWindow *stage_window,
       draw_view (stage_nested, renderer_view, texture);
     }
 
+  /* cogl_onscreen_egl_maybe_create_timestamp_query() no longer exists -
+   * timestamp queries are handled internally by the winsys now, so
+   * creating the frame info and swapping is all that's needed here. */
   frame_info = cogl_frame_info_new (context, 0, frame->frame_count);
-  cogl_onscreen_egl_maybe_create_timestamp_query (stage_x11->onscreen,
-                                                  frame_info);
   cogl_onscreen_swap_buffers (stage_x11->onscreen, frame_info, frame);
 
   if (!clutter_frame_has_result (frame))

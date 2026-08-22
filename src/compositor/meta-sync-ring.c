@@ -39,6 +39,8 @@
 
 #include "clutter/clutter.h"
 #include "cogl/cogl.h"
+#include "cogl/cogl-context-private.h"
+#include "cogl/cogl-display-private.h"
 #include "meta/util.h"
 
 /* Theory of operation:
