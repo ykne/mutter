@@ -26,6 +26,7 @@
 #include <fribidi.h>
 #include <X11/Xatom.h>
 #include <X11/XKBlib.h>
+#include <X11/keysymdef.h>
 
 #include "backends/meta-backend-private.h"
 #include "backends/meta-input-settings-private.h"
@@ -227,7 +228,8 @@ update_modifiers (MetaKeymapX11 *keymap_x11,
                                keymap_x11->current_group,
                                xkb_event->state.base_mods,
                                xkb_event->state.latched_mods,
-                               xkb_event->state.locked_mods);
+                               xkb_event->state.locked_mods,
+                               TRUE);
 
   if (num_lock_state != old_num_lock_state)
     {
