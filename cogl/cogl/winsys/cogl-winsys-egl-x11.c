@@ -48,7 +48,7 @@
 #include "cogl/winsys/cogl-onscreen-egl.h"
 #include "cogl/winsys/cogl-onscreen-xlib.h"
 #include "cogl/winsys/cogl-winsys-egl-x11-private.h"
-#include "cogl/winsys/cogl-winsys-egl-private.h"
+#include "cogl/winsys/cogl-winsys-egl.h"
 
 static const CoglWinsysEGLVtable _cogl_winsys_egl_vtable;
 
