@@ -341,15 +341,15 @@ cogl_winsys_egl_x11_context_init (CoglWinsys   *winsys,
   if (!parent_class->context_init (winsys, context, error))
     return FALSE;
 
+  /* We manually queue dirty events in response to Expose events from X
+   * (see event_filter_cb() below) - upstream's COGL_PRIVATE_FEATURE_DIRTY_EVENTS
+   * flag that used to advertise this no longer exists (it was X11-only
+   * and dropped along with the rest of X11 support), but nothing else in
+   * the current codebase gates behavior on it, so there's nothing to
+   * replace it with. */
   _cogl_renderer_add_native_filter (context->display->renderer,
                                     (CoglNativeFilterFunc) event_filter_cb,
                                     context);
-
-  /* We'll manually handle queueing dirty events in response to
-   * Expose events from X */
-  COGL_FLAGS_SET (context->private_features,
-                  COGL_PRIVATE_FEATURE_DIRTY_EVENTS,
-                  TRUE);
 
   return TRUE;
 }

@@ -83,7 +83,18 @@ typedef struct _CoglRenderer
 
   void *winsys_user_data;
   GDestroyNotify winsys_user_data_destroy;
+
+  GList *native_filters;
 } CoglRenderer;
+
+/* Restored alongside the X11 backend: upstream dropped this entirely
+ * when X11 support was removed (nothing outside the X11-only backend
+ * files needs to filter raw native (XEvent) events). */
+typedef struct _CoglNativeFilterClosure
+{
+  CoglNativeFilterFunc func;
+  void *data;
+} CoglNativeFilterClosure;
 
 G_DEFINE_FINAL_TYPE (CoglRenderer, cogl_renderer, G_TYPE_OBJECT);
 
@@ -94,6 +105,9 @@ cogl_renderer_dispose (GObject *object)
 
   g_clear_pointer (&renderer->winsys_user_data,
                    renderer->winsys_user_data_destroy);
+
+  g_list_free_full (renderer->native_filters, g_free);
+  renderer->native_filters = NULL;
 
   _cogl_closure_list_disconnect_all (&renderer->idle_closures);
 
@@ -553,4 +567,54 @@ cogl_renderer_set_display (CoglRenderer *renderer,
                            CoglDisplay   *display)
 {
   renderer->display = display;
+}
+
+void
+_cogl_renderer_add_native_filter (CoglRenderer         *renderer,
+                                  CoglNativeFilterFunc  func,
+                                  void                 *data)
+{
+  CoglNativeFilterClosure *closure = g_new0 (CoglNativeFilterClosure, 1);
+
+  closure->func = func;
+  closure->data = data;
+  renderer->native_filters = g_list_prepend (renderer->native_filters, closure);
+}
+
+void
+_cogl_renderer_remove_native_filter (CoglRenderer         *renderer,
+                                     CoglNativeFilterFunc  func,
+                                     void                 *data)
+{
+  GList *l;
+
+  for (l = renderer->native_filters; l; l = l->next)
+    {
+      CoglNativeFilterClosure *closure = l->data;
+
+      if (closure->func == func && closure->data == data)
+        {
+          renderer->native_filters =
+            g_list_delete_link (renderer->native_filters, l);
+          g_free (closure);
+          return;
+        }
+    }
+}
+
+CoglFilterReturn
+_cogl_renderer_handle_native_event (CoglRenderer *renderer,
+                                    void         *event)
+{
+  GList *l;
+
+  for (l = renderer->native_filters; l; l = l->next)
+    {
+      CoglNativeFilterClosure *closure = l->data;
+
+      if (closure->func (event, closure->data) == COGL_FILTER_REMOVE)
+        return COGL_FILTER_REMOVE;
+    }
+
+  return COGL_FILTER_CONTINUE;
 }
