@@ -36,6 +36,7 @@
 #include "cogl/cogl-texture-driver.h"
 #include "cogl/cogl-context.h"
 #include "cogl/cogl-closure-list-private.h"
+#include "cogl/cogl-renderer.h"
 #include "cogl/winsys/cogl-winsys.h"
 
 CoglDriver * cogl_renderer_get_driver (CoglRenderer *renderer);
@@ -54,12 +55,11 @@ void cogl_renderer_set_display (CoglRenderer *renderer,
 CoglDisplay * cogl_renderer_get_display (CoglRenderer *renderer);
 
 /* Restored alongside the X11 backend (see cogl-renderer.c): upstream
- * dropped native-event filtering entirely when X11 support was removed. */
-typedef enum _CoglFilterReturn
-{
-  COGL_FILTER_CONTINUE,
-  COGL_FILTER_REMOVE
-} CoglFilterReturn;
+ * dropped native-event filtering entirely when X11 support was removed.
+ * CoglFilterReturn and cogl_renderer_handle_event() are public API
+ * (declared with COGL_EXPORT in cogl-renderer.h) since host
+ * applications like mutter call cogl_renderer_handle_event() directly;
+ * only the filter-registration pieces below are cogl-internal. */
 
 typedef CoglFilterReturn (* CoglNativeFilterFunc) (void *event,
                                                    void *data);
@@ -71,6 +71,3 @@ void _cogl_renderer_add_native_filter (CoglRenderer         *renderer,
 void _cogl_renderer_remove_native_filter (CoglRenderer         *renderer,
                                           CoglNativeFilterFunc  func,
                                           void                 *data);
-
-CoglFilterReturn cogl_renderer_handle_event (CoglRenderer *renderer,
-                                                     void         *event);
