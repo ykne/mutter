@@ -177,6 +177,36 @@ meta_keymap_description_get_source (MetaKeymapDescription *keymap_description)
   return keymap_description->source;
 }
 
+/* Restored alongside the X11 backend: MetaBackendClass::set_keymap_async
+ * used to take plain rule strings (model/layout/variant/options)
+ * directly; it now takes a MetaKeymapDescription instead, with no public
+ * accessor back to those strings (only meta_keymap_description_create_xkb_keymap(),
+ * which compiles them into an xkb_keymap - not what X11's XKB rules-file
+ * based configuration needs). The X11 backend still configures the X
+ * server's keymap by pushing the original rule strings via XkbRF_Load()/
+ * XkbRF_GetComponents(), so it needs them back out verbatim. */
+gboolean
+meta_keymap_description_get_rules (MetaKeymapDescription  *keymap_description,
+                                   const char            **model,
+                                   const char            **layout,
+                                   const char            **variant,
+                                   const char            **options)
+{
+  if (keymap_description->source != META_KEYMAP_DESCRIPTION_SOURCE_RULES)
+    return FALSE;
+
+  if (model)
+    *model = keymap_description->rules.model;
+  if (layout)
+    *layout = keymap_description->rules.layout;
+  if (variant)
+    *variant = keymap_description->rules.variant;
+  if (options)
+    *options = keymap_description->rules.options;
+
+  return TRUE;
+}
+
 gboolean
 meta_keymap_description_direct_equal (MetaKeymapDescription *keymap_description,
                                       MetaKeymapDescription *other)

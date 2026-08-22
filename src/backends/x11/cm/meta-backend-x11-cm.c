@@ -26,6 +26,7 @@
 
 #include "backends/meta-backend-private.h"
 #include "backends/meta-dnd-private.h"
+#include "backends/meta-keymap-description-private.h"
 #include "backends/x11/meta-barrier-x11.h"
 #include "backends/x11/meta-cursor-renderer-x11.h"
 #include "backends/x11/meta-cursor-tracker-x11.h"
@@ -386,42 +387,45 @@ apply_keymap (MetaBackendX11 *x11)
 }
 
 static void
-meta_backend_x11_cm_set_keymap_async (MetaBackend *backend,
-                                      const char  *layouts,
-                                      const char  *variants,
-                                      const char  *options,
-                                      const char  *model,
-                                      GTask       *task)
-{
-  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
-  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
-
-  g_free (x11_cm->keymap_layouts);
-  x11_cm->keymap_layouts = g_strdup (layouts);
-  g_free (x11_cm->keymap_variants);
-  x11_cm->keymap_variants = g_strdup (variants);
-  g_free (x11_cm->keymap_options);
-  x11_cm->keymap_options = g_strdup (options);
-  g_free (x11_cm->keymap_model);
-  x11_cm->keymap_model = g_strdup (model);
-
-  apply_keymap (x11);
-
-  g_task_return_boolean (task, TRUE);
-  g_object_unref (task);
-}
-
-static void
-meta_backend_x11_cm_set_keymap_layout_group_async (MetaBackend        *backend,
-                                                   xkb_layout_index_t  idx,
-                                                   GTask              *task)
+meta_backend_x11_cm_set_keymap_async (MetaBackend           *backend,
+                                      MetaKeymapDescription *description,
+                                      xkb_layout_index_t     layout_index,
+                                      GTask                 *task)
 {
   MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
   MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
   Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+  const char *model = NULL, *layout = NULL, *variant = NULL, *options = NULL;
 
-  x11_cm->locked_group = idx;
-  XkbLockGroup (xdisplay, XkbUseCoreKbd, idx);
+  /* MetaBackendClass::set_keymap_async() used to take plain rule strings
+   * directly and be paired with a separate set_keymap_layout_group_async();
+   * both are now one call taking a MetaKeymapDescription plus the layout
+   * index together. X11's own keymap application (apply_keymap(), below)
+   * still works from raw rule strings (it pushes them to the X server via
+   * XkbRF_Load()/XkbRF_GetComponents()), so pull them back out of the
+   * description (only meaningful when it's rules-based - see
+   * meta_keymap_description_get_rules()'s comment). A description built
+   * from a sealed FD (the other possible source) has no rule strings to
+   * extract; in that case we can't reconfigure the X server's keymap this
+   * way, so just apply the layout group index and leave the base keymap
+   * as-is. */
+  if (meta_keymap_description_get_rules (description,
+                                         &model, &layout, &variant, &options))
+    {
+      g_free (x11_cm->keymap_layouts);
+      x11_cm->keymap_layouts = g_strdup (layout);
+      g_free (x11_cm->keymap_variants);
+      x11_cm->keymap_variants = g_strdup (variant);
+      g_free (x11_cm->keymap_options);
+      x11_cm->keymap_options = g_strdup (options);
+      g_free (x11_cm->keymap_model);
+      x11_cm->keymap_model = g_strdup (model);
+
+      apply_keymap (x11);
+    }
+
+  x11_cm->locked_group = layout_index;
+  XkbLockGroup (xdisplay, XkbUseCoreKbd, layout_index);
 
   g_task_return_boolean (task, TRUE);
   g_object_unref (task);
@@ -561,7 +565,6 @@ meta_backend_x11_cm_class_init (MetaBackendX11CmClass *klass)
   backend_class->update_stage = meta_backend_x11_cm_update_stage;
   backend_class->select_stage_events = meta_backend_x11_cm_select_stage_events;
   backend_class->set_keymap_async = meta_backend_x11_cm_set_keymap_async;
-  backend_class->set_keymap_layout_group_async = meta_backend_x11_cm_set_keymap_layout_group_async;
 
   backend_x11_class->handle_host_xevent = meta_backend_x11_cm_handle_host_xevent;
   backend_x11_class->translate_device_event = meta_backend_x11_cm_translate_device_event;
