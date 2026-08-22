@@ -931,7 +931,7 @@ init_xkb_state (MetaBackendX11 *x11)
   int32_t device_id;
   struct xkb_state *state;
 
-  keymap = meta_backend_get_keymap (META_BACKEND (x11));
+  keymap = meta_backend_get_xkb_keymap (META_BACKEND (x11));
 
   device_id = xkb_x11_get_core_keyboard_device_id (priv->xcb);
   state = xkb_x11_state_new_from_device (keymap, priv->xcb, device_id);
@@ -987,7 +987,6 @@ static gboolean
 meta_backend_x11_init_basic (MetaBackend  *backend,
                              GError      **error)
 {
-  MetaContext *context = meta_backend_get_context (backend);
   MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
   MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
   Display *xdisplay;
@@ -1009,7 +1008,13 @@ meta_backend_x11_init_basic (MetaBackend  *backend,
       return FALSE;
     }
 
-  XSynchronize (xdisplay, meta_context_is_x11_sync (context));
+  /* meta_context_is_x11_sync() (an --sync-style debug flag forcing
+   * synchronous Xlib calls for protocol-error debugging) doesn't exist
+   * anywhere in the current tree - not just renamed, genuinely absent
+   * from both upstream and the gnome-xorg fork itself. Default to
+   * asynchronous (FALSE), same as every other Xlib client; only affects
+   * debugging convenience, not functionality. */
+  XSynchronize (xdisplay, FALSE);
 
   priv->xdisplay = xdisplay;
   priv->xscreen = DefaultScreenOfDisplay (xdisplay);
@@ -1096,7 +1101,7 @@ meta_backend_x11_class_init (MetaBackendX11Class *klass)
   backend_class->ungrab_keyboard = meta_backend_x11_ungrab_keyboard;
   backend_class->finish_touch_sequence = meta_backend_x11_finish_touch_sequence;
   backend_class->get_current_logical_monitor = meta_backend_x11_get_current_logical_monitor;
-  backend_class->get_keymap = meta_backend_x11_get_keymap;
+  backend_class->get_xkb_keymap = meta_backend_x11_get_keymap;
   backend_class->get_keymap_layout_group = meta_backend_x11_get_keymap_layout_group;
 }
 
@@ -1309,7 +1314,7 @@ meta_backend_x11_allow_events (MetaBackendX11     *backend_x11,
   int xi_event_mode, device_id;
   uint32_t time_ms;
 
-  device = clutter_event_get_device (event);
+  device = clutter_event_get_source_device (event);
   device_id = meta_input_device_x11_get_device_id (device);
   time_ms = clutter_event_get_time (event);
 

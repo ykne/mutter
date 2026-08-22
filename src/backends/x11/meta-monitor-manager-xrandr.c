@@ -906,7 +906,7 @@ meta_monitor_manager_xrandr_get_default_layout_mode (MetaMonitorManager *manager
 
 static void
 meta_monitor_manager_xrandr_set_output_ctm (MetaOutput          *output,
-                                            const MetaOutputCtm *ctm)
+                                            const MetaCtm *ctm)
 {
   meta_output_xrandr_set_ctm (META_OUTPUT_XRANDR (output), ctm);
 }
