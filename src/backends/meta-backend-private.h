@@ -42,6 +42,18 @@
 #include "core/meta-context-private.h"
 #include "core/util-private.h"
 
+/* Restored alongside the X11 backend: upstream removed this type along
+ * with the touch-sequence accept/reject vfunc it's used for
+ * (finish_touch_sequence, below) - both are otherwise unused/uncalled
+ * dead code (X11 XInput2 touch ownership semantics have no callers
+ * anywhere in the current tree), kept only so meta-backend-x11.c's
+ * existing implementation still compiles. */
+typedef enum
+{
+  META_SEQUENCE_ACCEPTED,
+  META_SEQUENCE_REJECTED,
+} MetaSequenceState;
+
 #define DEFAULT_XKB_RULES_FILE "evdev"
 #define DEFAULT_XKB_MODEL "pc105+inet"
 
