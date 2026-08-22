@@ -26,6 +26,7 @@
 
 #include <glib.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 
 #include "backends/meta-monitor-manager-private.h"
 #include "core/display-private.h"
@@ -222,6 +223,10 @@ void meta_x11_display_remove_alarm_filter (MetaX11Display     *x11_display,
                                            MetaX11AlarmFilter *alarm_filter);
 
 void meta_x11_display_create_guard_window (MetaX11Display *x11_display);
+
+void meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
+                                              XRectangle      *rects,
+                                              int              n_rects);
 
 guint32 meta_x11_display_get_current_time_roundtrip (MetaX11Display *x11_display);
 

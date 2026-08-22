@@ -1820,6 +1820,30 @@ meta_x11_display_create_guard_window (MetaX11Display *x11_display)
     x11_display->guard_window = create_guard_window (x11_display);
 }
 
+/* Sets the input shape region of the composite overlay window (the window
+ * the compositor draws into, sitting above all client windows) to the
+ * given rectangles - an empty region (rects == NULL, n_rects == 0) makes
+ * the overlay window pass all input through to the reparented client
+ * windows beneath it, which is what the X11 compositor wants. */
+void
+meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
+                                         XRectangle      *rects,
+                                         int              n_rects)
+{
+  XserverRegion region;
+
+  region = XFixesCreateRegion (x11_display->xdisplay, rects, n_rects);
+  XFixesSetWindowShapeRegion (x11_display->xdisplay,
+                              x11_display->composite_overlay_window,
+                              ShapeInput, 0, 0, region);
+
+  if (x11_display->stage_input_region != None)
+    XFixesDestroyRegion (x11_display->xdisplay,
+                         x11_display->stage_input_region);
+
+  x11_display->stage_input_region = region;
+}
+
 static void
 on_monitors_changed_internal (MetaMonitorManager *monitor_manager,
                               MetaX11Display     *x11_display)

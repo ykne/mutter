@@ -35,11 +35,6 @@
 #include "x11/meta-x11-display-private.h"
 #include "x11/window-x11.h"
 
-#define IS_GESTURE_EVENT(et) ((et) == CLUTTER_TOUCH_BEGIN || \
-                              (et) == CLUTTER_TOUCH_UPDATE || \
-                              (et) == CLUTTER_TOUCH_END || \
-                              (et) == CLUTTER_TOUCH_CANCEL)
-
 struct _MetaCompositorX11
 {
   MetaCompositor parent;
@@ -99,7 +94,7 @@ meta_compositor_x11_process_xevent (MetaCompositorX11 *compositor_x11,
   MetaX11Display *x11_display = display->x11_display;
   int damage_event_base;
 
-  damage_event_base = meta_x11_display_get_damage_event_base (x11_display);
+  damage_event_base = x11_display->damage_event_base;
   if (xevent->type == damage_event_base + XDamageNotify)
     {
       /*
@@ -944,28 +939,6 @@ meta_compositor_x11_create_view (MetaCompositor   *compositor,
   return meta_compositor_view_new (stage_view);
 }
 
-static gboolean
-meta_compositor_x11_handle_event (MetaCompositor     *compositor,
-                                  const ClutterEvent *event,
-                                  MetaWindow         *event_window,
-                                  MetaEventMode       mode_hint)
-{
-  MetaBackend *backend = meta_compositor_get_backend (compositor);
-  ClutterEventType event_type = clutter_event_type (event);
-
-  if (event_type == CLUTTER_BUTTON_PRESS ||
-      event_type == CLUTTER_KEY_PRESS)
-    {
-      meta_backend_x11_allow_events (META_BACKEND_X11 (backend),
-                                     event, mode_hint);
-    }
-
-  if (event_window && !IS_GESTURE_EVENT (clutter_event_type (event)))
-    return CLUTTER_EVENT_STOP;
-
-  return CLUTTER_EVENT_PROPAGATE;
-}
-
 static void
 meta_compositor_x11_notify_mapping_change (MetaCompositor   *compositor,
                                            MetaMappingType   type,
@@ -1110,7 +1083,13 @@ meta_compositor_x11_class_init (MetaCompositorX11Class *klass)
   compositor_class->monotonic_to_high_res_xserver_time =
    meta_compositor_x11_monotonic_to_high_res_xserver_time;
   compositor_class->create_view = meta_compositor_x11_create_view;
-  compositor_class->handle_event = meta_compositor_x11_handle_event;
+  /* MetaCompositorClass no longer has a handle_event vfunc - passive
+   * X11 button/key grab replay used to be hooked in here
+   * (meta_backend_x11_allow_events()), but event dispatch now goes
+   * through the unified meta_display_handle_event() pipeline in
+   * core/events.c for both X11 and Wayland, with no equivalent
+   * per-compositor hook. meta_backend_x11_allow_events() and
+   * MetaEventMode are otherwise unused. */
   compositor_class->notify_mapping_change =
     meta_compositor_x11_notify_mapping_change;
 }
