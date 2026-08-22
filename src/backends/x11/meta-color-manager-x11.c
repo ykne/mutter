@@ -116,10 +116,10 @@ double_to_ctmval (double value)
     (uint64_t) (fractional * 0xffffffffUL);
 }
 
-static MetaOutputCtm
+static MetaCtm
 mat33_to_ctm (const CdMat3x3 *matrix)
 {
-  MetaOutputCtm ctm;
+  MetaCtm ctm;
 
   /*
    * libcolord generates a matrix containing double values. RandR's CTM
@@ -144,7 +144,7 @@ update_device_ctm (MetaColorDevice *color_device)
   MetaMonitor *monitor;
   MetaColorProfile *color_profile;
   const MetaColorCalibration *color_calibration;
-  MetaOutputCtm ctm;
+  MetaCtm ctm;
   MetaOutput *output;
   MetaOutputXrandr *output_xrandr;
 

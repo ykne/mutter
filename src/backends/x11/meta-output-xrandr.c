@@ -54,7 +54,7 @@ struct _MetaOutputXrandr
   MetaOutput parent;
 
   gboolean ctm_initialized;
-  MetaOutputCtm ctm;
+  MetaCtm ctm;
 };
 
 G_DEFINE_TYPE (MetaOutputXrandr, meta_output_xrandr, META_TYPE_OUTPUT)
@@ -193,8 +193,8 @@ meta_output_xrandr_apply_mode (MetaOutputXrandr *output_xrandr)
 }
 
 static gboolean
-ctm_is_equal (const MetaOutputCtm *ctm1,
-              const MetaOutputCtm *ctm2)
+ctm_is_equal (const MetaCtm *ctm1,
+              const MetaCtm *ctm2)
 {
   int i;
 
@@ -209,7 +209,7 @@ ctm_is_equal (const MetaOutputCtm *ctm1,
 
 void
 meta_output_xrandr_set_ctm (MetaOutputXrandr *output_xrandr,
-                            const MetaOutputCtm *ctm)
+                            const MetaCtm *ctm)
 {
   if (!output_xrandr->ctm_initialized ||
       !ctm_is_equal (ctm, &output_xrandr->ctm))
