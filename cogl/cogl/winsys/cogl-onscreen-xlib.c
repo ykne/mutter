@@ -29,6 +29,8 @@
 #include "cogl/winsys/cogl-onscreen-xlib.h"
 
 #include "cogl/cogl-context-private.h"
+#include "cogl/cogl-display-private.h"
+#include "cogl/cogl-framebuffer-private.h"
 #include "cogl/cogl-renderer-private.h"
 #include "cogl/cogl-x11-onscreen.h"
 #include "cogl/cogl-xlib-renderer-private.h"
@@ -144,13 +146,11 @@ cogl_onscreen_xlib_allocate (CoglFramebuffer  *framebuffer,
   CoglDisplay *display = context->display;
   CoglRenderer *renderer = display->renderer;
   CoglRendererEGL *egl_renderer = cogl_renderer_get_winsys_data (renderer);
-  EGLConfig egl_config;
+  CoglDisplayEGL *egl_display = display->winsys;
+  EGLConfig egl_config = egl_display->egl_config;
   Window xwin;
   EGLSurface egl_surface;
   CoglFramebufferClass *parent_class;
-
-  if (!cogl_onscreen_egl_choose_config (onscreen_egl, &egl_config, error))
-    return FALSE;
 
   xwin = create_xwindow (onscreen_xlib, egl_config, error);
   if (xwin == None)
@@ -238,7 +238,7 @@ cogl_onscreen_xlib_resize (CoglOnscreen *onscreen,
 {
   CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
 
-  _cogl_framebuffer_winsys_update_size (framebuffer, width, height);
+  cogl_framebuffer_update_size (framebuffer, width, height);
 }
 
 CoglOnscreenXlib *

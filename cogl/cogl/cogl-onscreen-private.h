@@ -69,3 +69,11 @@ cogl_onscreen_peek_head_frame_info (CoglOnscreen *onscreen);
 
 COGL_EXPORT CoglFrameInfo *
 cogl_onscreen_pop_head_frame_info (CoglOnscreen *onscreen);
+
+/* Restored alongside the X11 backend: this is upstream's own dirty-region
+ * bookkeeping (still used internally by cogl-onscreen.c), made non-static
+ * again so the X11 winsys backend can call it directly in response to
+ * Expose events, exactly as it did before X11 support was dropped. */
+void
+_cogl_onscreen_queue_dirty (CoglOnscreen       *onscreen,
+                           const MtkRectangle *info);

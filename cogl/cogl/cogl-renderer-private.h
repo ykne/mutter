@@ -52,3 +52,25 @@ void cogl_renderer_set_display (CoglRenderer *renderer,
                                 CoglDisplay   *display);
 
 CoglDisplay * cogl_renderer_get_display (CoglRenderer *renderer);
+
+/* Restored alongside the X11 backend (see cogl-renderer.c): upstream
+ * dropped native-event filtering entirely when X11 support was removed. */
+typedef enum _CoglFilterReturn
+{
+  COGL_FILTER_CONTINUE,
+  COGL_FILTER_REMOVE
+} CoglFilterReturn;
+
+typedef CoglFilterReturn (* CoglNativeFilterFunc) (void *event,
+                                                   void *data);
+
+void _cogl_renderer_add_native_filter (CoglRenderer         *renderer,
+                                       CoglNativeFilterFunc  func,
+                                       void                 *data);
+
+void _cogl_renderer_remove_native_filter (CoglRenderer         *renderer,
+                                          CoglNativeFilterFunc  func,
+                                          void                 *data);
+
+CoglFilterReturn _cogl_renderer_handle_native_event (CoglRenderer *renderer,
+                                                     void         *event);

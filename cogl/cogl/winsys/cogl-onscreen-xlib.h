@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <X11/Xlib.h>
+
 #include "cogl/cogl-onscreen.h"
 #include "cogl/winsys/cogl-onscreen-egl.h"
 
