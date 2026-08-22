@@ -50,15 +50,21 @@ CoglXlibRenderer *
 _cogl_xlib_renderer_get_data (CoglRenderer *renderer)
 {
   /* Constructs a CoglXlibRenderer struct on demand and attaches it to
-     the object using user data. It's done this way instead of using a
-     subclassing hierarchy in the winsys data because all EGL winsys's
-     need the EGL winsys data but only one of them wants the Xlib
-     data. */
+     the renderer object as GObject data. It's done this way instead of
+     using the winsys_data slot (cogl_renderer_{get,set}_winsys_data())
+     because that slot is already used by the EGL winsys for its own
+     CoglRendererEGL struct - the two need to coexist. */
+  CoglXlibRenderer *xlib_renderer =
+    g_object_get_data (G_OBJECT (renderer), "-cogl-xlib-renderer-data");
 
-  if (!cogl_renderer_get_custom_winsys_data (renderer))
-    cogl_renderer_set_custom_winsys_data (renderer,  g_new0 (CoglXlibRenderer, 1));
+  if (!xlib_renderer)
+    {
+      xlib_renderer = g_new0 (CoglXlibRenderer, 1);
+      g_object_set_data_full (G_OBJECT (renderer), "-cogl-xlib-renderer-data",
+                             xlib_renderer, g_free);
+    }
 
-  return cogl_renderer_get_custom_winsys_data (renderer);
+  return xlib_renderer;
 }
 
 static void
@@ -267,8 +273,6 @@ update_outputs (CoglRenderer *renderer,
 
   if (changed)
     {
-      const CoglWinsysVtable *winsys = cogl_renderer_get_winsys_vtable (renderer);
-
       if (notify)
         COGL_NOTE (WINSYS, "Outputs changed:");
       else
@@ -313,9 +317,6 @@ update_outputs (CoglRenderer *renderer,
                      subpixel_string,
                      output->refresh_rate);
         }
-
-      if (notify && winsys->renderer_outputs_changed != NULL)
-        winsys->renderer_outputs_changed (renderer);
     }
 }
 
