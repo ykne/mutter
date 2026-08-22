@@ -395,6 +395,19 @@ cogl_xlib_renderer_get_display (CoglRenderer *renderer)
   return xlib_renderer->xdpy;
 }
 
+void
+cogl_xlib_renderer_set_foreign_display (CoglRenderer *renderer,
+                                        Display      *display)
+{
+  CoglXlibRenderer *xlib_renderer;
+
+  g_return_if_fail (COGL_IS_RENDERER (renderer));
+
+  xlib_renderer = _cogl_xlib_renderer_get_data (renderer);
+
+  xlib_renderer->xdpy = display;
+}
+
 float
 _cogl_xlib_renderer_refresh_rate_for_rectangle (CoglRenderer *renderer,
                                                 int           x,

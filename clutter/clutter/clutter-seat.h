@@ -115,6 +115,7 @@ CLUTTER_EXPORT
 ClutterContext * clutter_seat_get_context (ClutterSeat *seat);
 CLUTTER_EXPORT
 GList * clutter_seat_list_devices (ClutterSeat *seat);
+CLUTTER_EXPORT
 const GList * clutter_seat_peek_devices (ClutterSeat *seat);
 CLUTTER_EXPORT
 void clutter_seat_bell_notify (ClutterSeat *seat);
