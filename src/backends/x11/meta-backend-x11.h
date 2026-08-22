@@ -39,6 +39,19 @@ enum _MetaPassiveGrabMode
   META_GRAB_MODE_ASYNC,
 };
 
+/* Restored alongside the X11 backend: doesn't exist upstream any more
+ * (removed with the rest of X11 support), needed by
+ * meta_backend_x11_allow_events()'s XIAllowEvents()-based implementation
+ * and its one real caller in meta-compositor-x11.c. */
+typedef enum _MetaEventMode MetaEventMode;
+
+enum _MetaEventMode
+{
+  META_EVENT_MODE_KEEP_FROZEN,
+  META_EVENT_MODE_REPLAY,
+  META_EVENT_MODE_THAW,
+};
+
 #define META_TYPE_BACKEND_X11 (meta_backend_x11_get_type ())
 G_DECLARE_DERIVABLE_TYPE (MetaBackendX11, meta_backend_x11,
                           META, BACKEND_X11, MetaBackend)
