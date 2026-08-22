@@ -19,9 +19,9 @@
 
 #include "backends/x11/nested/meta-backend-x11-nested.h"
 
-#include "backends/meta-input-settings-dummy.h"
 #include "backends/meta-monitor-manager-dummy.h"
 #include "backends/meta-stage-private.h"
+#include "backends/x11/meta-input-settings-x11.h"
 #include "backends/x11/nested/meta-backend-x11-nested.h"
 #include "backends/x11/nested/meta-cursor-renderer-x11-nested.h"
 #include "backends/x11/nested/meta-renderer-x11-nested.h"
@@ -87,7 +87,7 @@ meta_backend_x11_nested_get_input_settings (MetaBackend *backend)
   if (!backend_x11_nested->input_settings)
     {
       backend_x11_nested->input_settings =
-        g_object_new (META_TYPE_INPUT_SETTINGS_DUMMY,
+        g_object_new (META_TYPE_INPUT_SETTINGS_X11,
                       "backend", backend,
                       NULL);
     }
