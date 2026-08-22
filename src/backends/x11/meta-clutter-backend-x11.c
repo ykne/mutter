@@ -94,12 +94,11 @@ meta_clutter_backend_x11_create_stage (ClutterBackend  *clutter_backend,
   MetaClutterBackendX11Private *priv =
     meta_clutter_backend_x11_get_instance_private (clutter_backend_x11);
   ClutterStageWindow *stage;
-  GType stage_type;
-
-  if (meta_is_wayland_compositor ())
-    stage_type = META_TYPE_STAGE_X11_NESTED;
-  else
-    stage_type = META_TYPE_STAGE_X11;
+  /* meta_is_wayland_compositor() doesn't exist any more (removed with
+   * the rest of X11 support): this backend only runs as a real, primary
+   * X11 session now (not nested inside a Wayland compositor's Xwayland),
+   * so this is always the META_TYPE_STAGE_X11 branch. */
+  GType stage_type = META_TYPE_STAGE_X11;
 
   stage = g_object_new (stage_type,
 			"backend", priv->backend,
@@ -122,7 +121,8 @@ meta_clutter_backend_x11_get_default_seat (ClutterBackend *clutter_backend)
 static gboolean
 meta_clutter_backend_x11_is_display_server (ClutterBackend *clutter_backend)
 {
-  return meta_is_wayland_compositor ();
+  /* Real Xorg is the display server in this build; mutter is its client. */
+  return FALSE;
 }
 
 static ClutterSprite *
@@ -137,12 +137,8 @@ lookup_sprite (ClutterBackend       *clutter_backend,
   MetaClutterBackendX11Private *priv =
     meta_clutter_backend_x11_get_instance_private (clutter_backend_x11);
   ClutterInputDeviceType device_type;
-  GType sprite_type;
-
-  if (meta_is_wayland_compositor ())
-    sprite_type = META_TYPE_SPRITE_X11_NESTED;
-  else
-    sprite_type = META_TYPE_SPRITE_X11;
+  /* Always the primary-X11-session branch, see create_stage() above. */
+  GType sprite_type = META_TYPE_SPRITE_X11;
 
   device_type = clutter_input_device_get_device_type (device);
 
@@ -224,9 +220,28 @@ meta_clutter_backend_x11_get_pointer_sprite (ClutterBackend *clutter_backend,
                                              ClutterStage   *stage)
 {
   ClutterSeat *seat = clutter_backend_get_default_seat (clutter_backend);
+  ClutterInputDevice *pointer_device = NULL;
+  const GList *devices, *l;
+
+  /* clutter_seat_get_pointer() doesn't exist any more - a seat's devices
+   * are no longer assumed to have one canonical "the" pointer. Look up
+   * the first CLUTTER_POINTER_DEVICE instead, which is all lookup_sprite()
+   * below actually needs (it only reads the device's type to pick which
+   * sprite to look up/create). */
+  devices = clutter_seat_peek_devices (seat);
+  for (l = devices; l; l = l->next)
+    {
+      ClutterInputDevice *device = l->data;
+
+      if (clutter_input_device_get_device_type (device) == CLUTTER_POINTER_DEVICE)
+        {
+          pointer_device = device;
+          break;
+        }
+    }
 
   return lookup_sprite (clutter_backend, stage,
-                        clutter_seat_get_pointer (seat),
+                        pointer_device,
                         NULL, TRUE);
 }
 

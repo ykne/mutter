@@ -291,7 +291,12 @@ meta_window_actor_x11_assign_surface_actor (MetaWindowActor  *actor,
   prev_surface_actor = meta_window_actor_get_surface (actor);
   if (prev_surface_actor)
     {
-      g_warn_if_fail (meta_is_wayland_compositor ());
+      /* This used to warn if !meta_is_wayland_compositor() here (surface
+       * actor reassignment was assumed to be Wayland/Xwayland-surface-swap
+       * specific); meta_is_wayland_compositor() doesn't exist any more and
+       * this is always a primary X11 session, so that assumption no longer
+       * applies here one way or the other - dropped rather than leaving a
+       * warning that would now fire unconditionally on this path. */
 
       g_clear_signal_handler (&actor_x11->size_changed_id, prev_surface_actor);
       clutter_actor_remove_child (CLUTTER_ACTOR (actor),
