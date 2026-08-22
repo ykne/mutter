@@ -400,7 +400,10 @@ meta_surface_actor_x11_new (MetaWindow *window)
   MetaSurfaceActorX11 *self = g_object_new (META_TYPE_SURFACE_ACTOR_X11, NULL);
   MetaDisplay *display = meta_window_get_display (window);
 
-  g_assert (!meta_is_wayland_compositor ());
+  /* meta_is_wayland_compositor() doesn't exist any more; this used to
+   * assert !meta_is_wayland_compositor() here, which always holds now
+   * since this is always a primary X11 session, never nested inside a
+   * Wayland compositor's Xwayland. */
 
   self->window = window;
   self->display = display;
