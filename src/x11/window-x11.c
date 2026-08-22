@@ -4475,6 +4475,25 @@ meta_window_x11_has_alpha_channel (MetaWindow *window)
   return has_alpha;
 }
 
+gboolean
+meta_window_x11_can_unredirect (MetaWindowX11 *window_x11)
+{
+  MetaWindowX11Private *priv = meta_window_x11_get_instance_private (window_x11);
+
+  /* A window with server-side decorations needs the compositor to draw
+   * its frame around the client's pixmap, so it can't be handed off for
+   * direct X11 unredirection. */
+  if (priv->frame)
+    return FALSE;
+
+  /* A custom bounding shape can't be represented by X11 unredirection,
+   * which maps the whole window straight through without clipping. */
+  if (priv->shape_region)
+    return FALSE;
+
+  return TRUE;
+}
+
 /**
  * meta_window_x11_get_xwindow: (skip)
  * @window: a #MetaWindow
