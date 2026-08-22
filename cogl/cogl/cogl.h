@@ -86,6 +86,7 @@
 #include "cogl/cogl-snippet.h"
 #include "cogl/cogl-framebuffer.h"
 #include "cogl/cogl-onscreen.h"
+#include "cogl/cogl-x11-onscreen.h"
 #include "cogl/cogl-frame-info.h"
 #include "cogl/cogl-glib-source.h"
 #include "cogl/cogl-trace.h"
