@@ -26,7 +26,7 @@
 #include <fribidi.h>
 #include <X11/Xatom.h>
 #include <X11/XKBlib.h>
-#include <X11/keysymdef.h>
+#include <X11/keysym.h>
 
 #include "backends/meta-backend-private.h"
 #include "backends/meta-input-settings-private.h"
