@@ -30,11 +30,32 @@
 
 #pragma once
 
-#include "cogl/winsys/cogl-winsys.h"
+#include "cogl/winsys/cogl-winsys-egl.h"
+#include "cogl/winsys/cogl-texture-pixmap-x11-private.h"
 
-COGL_EXPORT const CoglWinsysVtable *
-_cogl_winsys_egl_xlib_get_vtable (void);
+#define COGL_TYPE_WINSYS_EGL_X11 (cogl_winsys_egl_x11_get_type ())
+COGL_EXPORT
+G_DECLARE_FINAL_TYPE (CoglWinsysEglX11, cogl_winsys_egl_x11,
+                     COGL, WINSYS_EGL_X11, CoglWinsysEGL)
 
 XVisualInfo *
 cogl_display_xlib_get_visual_info (CoglDisplay *display,
                                    EGLConfig    egl_config);
+
+gboolean
+cogl_winsys_egl_x11_texture_pixmap_create (CoglTexturePixmapX11 *tex_pixmap);
+
+void
+cogl_winsys_egl_x11_texture_pixmap_free (CoglTexturePixmapX11 *tex_pixmap);
+
+gboolean
+cogl_winsys_egl_x11_texture_pixmap_update (CoglTexturePixmapX11 *tex_pixmap,
+                                           CoglTexturePixmapStereoMode stereo_mode,
+                                           gboolean needs_mipmap);
+
+void
+cogl_winsys_egl_x11_texture_pixmap_damage_notify (CoglTexturePixmapX11 *tex_pixmap);
+
+CoglTexture *
+cogl_winsys_egl_x11_texture_pixmap_get_texture (CoglTexturePixmapX11 *tex_pixmap,
+                                                CoglTexturePixmapStereoMode stereo_mode);

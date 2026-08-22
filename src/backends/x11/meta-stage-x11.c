@@ -37,6 +37,7 @@
 #include "clutter/clutter-mutter.h"
 #include "cogl/cogl-mutter.h"
 #include "cogl/cogl.h"
+#include "cogl/winsys/cogl-onscreen-xlib.h"
 #include "core/display-private.h"
 #include "meta/meta-context.h"
 
@@ -254,31 +255,11 @@ create_onscreen (CoglContext *cogl_context,
                  int          width,
                  int          height)
 {
-  CoglDisplay *cogl_display = cogl_context_get_display (cogl_context);
-  CoglRenderer *cogl_renderer = cogl_display_get_renderer (cogl_display);
-
-  switch (cogl_renderer_get_winsys_id (cogl_renderer))
-    {
-    case COGL_WINSYS_ID_GLX:
-#ifdef HAVE_GLX
-      return COGL_ONSCREEN (cogl_onscreen_glx_new (cogl_context,
-                                                   width, height));
-#else
-      g_assert_not_reached ();
-      break;
-#endif
-    case COGL_WINSYS_ID_EGL_XLIB:
-#ifdef HAVE_EGL
-      return COGL_ONSCREEN (cogl_onscreen_xlib_new (cogl_context,
-                                                    width, height));
-#else
-      g_assert_not_reached ();
-      break;
-#endif
-    default:
-      g_assert_not_reached ();
-      return NULL;
-    }
+  /* GLX support isn't built (-Dglx=false): EGL-over-Xlib is the only
+   * X11 onscreen backend, so there's no winsys ID to switch on any
+   * more (cogl_renderer_get_winsys_id()/CoglWinsysID were dropped
+   * along with the old static-vtable winsys dispatch). */
+  return COGL_ONSCREEN (cogl_onscreen_xlib_new (cogl_context, width, height));
 }
 
 static gboolean
