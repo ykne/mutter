@@ -39,9 +39,19 @@ static GParamSpec *obj_props[N_PROPS];
 
 struct _MetaCursorSpriteXfixes
 {
-  MetaCursorSprite parent;
+  ClutterCursor parent;
 
   MetaDisplay *display;
+
+  /* Upstream's MetaCursorSprite (this class's old parent) took a texture
+   * via meta_cursor_sprite_set_texture() and exposed it generically; its
+   * replacement, ClutterCursor, instead has subclasses store their own
+   * texture/hotspot and implement get_texture() to hand it back on
+   * request (see the stock MetaCursorXcursor class for the pattern this
+   * follows). */
+  CoglTexture *texture;
+  int hot_x;
+  int hot_y;
 };
 
 static void
@@ -49,20 +59,35 @@ meta_screen_cast_xfixes_init_initable_iface (GInitableIface *iface);
 
 G_DEFINE_TYPE_WITH_CODE (MetaCursorSpriteXfixes,
                          meta_cursor_sprite_xfixes,
-                         META_TYPE_CURSOR_SPRITE,
+                         CLUTTER_TYPE_CURSOR,
                          G_IMPLEMENT_INTERFACE (G_TYPE_INITABLE,
                                                 meta_screen_cast_xfixes_init_initable_iface))
 
 static gboolean
-meta_cursor_sprite_xfixes_realize_texture (MetaCursorSprite *sprite)
+meta_cursor_sprite_xfixes_realize_texture (ClutterCursor *cursor)
 {
   return TRUE;
 }
 
 static gboolean
-meta_cursor_sprite_xfixes_is_animated (MetaCursorSprite *sprite)
+meta_cursor_sprite_xfixes_is_animated (ClutterCursor *cursor)
 {
   return FALSE;
+}
+
+static CoglTexture *
+meta_cursor_sprite_xfixes_get_texture (ClutterCursor *cursor,
+                                       int           *hot_x,
+                                       int           *hot_y)
+{
+  MetaCursorSpriteXfixes *sprite_xfixes = META_CURSOR_SPRITE_XFIXES (cursor);
+
+  if (hot_x)
+    *hot_x = sprite_xfixes->hot_x;
+  if (hot_y)
+    *hot_y = sprite_xfixes->hot_y;
+
+  return sprite_xfixes->texture;
 }
 
 static void
@@ -111,7 +136,6 @@ meta_cursor_sprite_xfixes_new (MetaDisplay        *display,
   return g_initable_new (META_TYPE_CURSOR_SPRITE_XFIXES,
                          NULL, error,
                          "display", display,
-                         "cursor-tracker", cursor_tracker,
                          NULL);
 }
 
@@ -122,7 +146,6 @@ meta_cursor_sprite_xfixes_initable_init (GInitable     *initable,
 {
   MetaCursorSpriteXfixes *sprite_xfixes =
     META_CURSOR_SPRITE_XFIXES (initable);
-  MetaCursorSprite *sprite = META_CURSOR_SPRITE (sprite_xfixes);
   MetaX11Display *x11_display;
   Display *xdisplay;
   XFixesCursorImage *cursor_image;
@@ -190,14 +213,15 @@ meta_cursor_sprite_xfixes_initable_init (GInitable     *initable,
   if (free_cursor_data)
     g_free (cursor_data);
 
-  if (!sprite)
-    return FALSE;
+  if (!texture)
+    {
+      XFree (cursor_image);
+      return FALSE;
+    }
 
-  meta_cursor_sprite_set_texture (sprite,
-                                  texture,
-                                  cursor_image->xhot,
-                                  cursor_image->yhot);
-  g_object_unref (texture);
+  sprite_xfixes->texture = texture;
+  sprite_xfixes->hot_x = cursor_image->xhot;
+  sprite_xfixes->hot_y = cursor_image->yhot;
   XFree (cursor_image);
 
   return TRUE;
@@ -215,17 +239,28 @@ meta_cursor_sprite_xfixes_init (MetaCursorSpriteXfixes *sprite_xfixes)
 }
 
 static void
+meta_cursor_sprite_xfixes_finalize (GObject *object)
+{
+  MetaCursorSpriteXfixes *sprite_xfixes = META_CURSOR_SPRITE_XFIXES (object);
+
+  g_clear_object (&sprite_xfixes->texture);
+
+  G_OBJECT_CLASS (meta_cursor_sprite_xfixes_parent_class)->finalize (object);
+}
+
+static void
 meta_cursor_sprite_xfixes_class_init (MetaCursorSpriteXfixesClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
-  MetaCursorSpriteClass *cursor_sprite_class = META_CURSOR_SPRITE_CLASS (klass);
+  ClutterCursorClass *cursor_class = CLUTTER_CURSOR_CLASS (klass);
 
   object_class->get_property = meta_cursor_sprite_xfixes_get_property;
   object_class->set_property = meta_cursor_sprite_xfixes_set_property;
+  object_class->finalize = meta_cursor_sprite_xfixes_finalize;
 
-  cursor_sprite_class->realize_texture =
-    meta_cursor_sprite_xfixes_realize_texture;
-  cursor_sprite_class->is_animated = meta_cursor_sprite_xfixes_is_animated;
+  cursor_class->realize_texture = meta_cursor_sprite_xfixes_realize_texture;
+  cursor_class->is_animated = meta_cursor_sprite_xfixes_is_animated;
+  cursor_class->get_texture = meta_cursor_sprite_xfixes_get_texture;
 
   obj_props[PROP_DISPLAY] =
     g_param_spec_object ("display", NULL, NULL,

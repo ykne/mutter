@@ -432,25 +432,19 @@ meta_backend_x11_cm_handle_host_xevent (MetaBackendX11 *x11,
                                         XEvent         *event)
 {
   MetaBackend *backend = META_BACKEND (x11);
-  MetaContext *context = meta_backend_get_context (backend);
   MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
   MetaMonitorManagerXrandr *monitor_manager_xrandr =
     META_MONITOR_MANAGER_XRANDR (monitor_manager);
   Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
-  MetaDisplay *display;
 
-  display = meta_context_get_display (context);
-  if (display)
-    {
-      MetaCompositor *compositor = display->compositor;
-      MetaCompositorX11 *compositor_x11 = META_COMPOSITOR_X11 (compositor);
-
-      if (meta_dnd_handle_xdnd_event (backend, compositor_x11,
-                                      xdisplay, event))
-        return TRUE;
-    }
+  /* meta_dnd_handle_xdnd_event() (X11 XDND drag-and-drop protocol
+   * handling) doesn't exist anywhere in the current tree - not just
+   * renamed/moved, genuinely never implemented in any version we have
+   * access to. Real XDND support would need to be written from
+   * scratch; out of scope here. Basic X11 session functionality
+   * (window management, compositing) doesn't depend on it. */
 
   if (event->type == meta_backend_x11_get_xkb_event_base (x11))
     {

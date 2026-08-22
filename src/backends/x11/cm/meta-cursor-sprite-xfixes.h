@@ -20,14 +20,14 @@
 
 #include <glib-object.h>
 
-#include "backends/meta-cursor.h"
+#include "clutter/clutter.h"
 #include "meta/types.h"
 
 #define META_TYPE_CURSOR_SPRITE_XFIXES (meta_cursor_sprite_xfixes_get_type ())
 G_DECLARE_FINAL_TYPE (MetaCursorSpriteXfixes,
                       meta_cursor_sprite_xfixes,
                       META, CURSOR_SPRITE_XFIXES,
-                      MetaCursorSprite)
+                      ClutterCursor)
 
 MetaCursorSpriteXfixes * meta_cursor_sprite_xfixes_new (MetaDisplay        *display,
                                                         MetaCursorTracker  *cursor_tracker,

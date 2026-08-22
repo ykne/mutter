@@ -26,7 +26,7 @@
 
 #include <X11/extensions/Xfixes.h>
 
-#include "backends/meta-cursor-sprite-xcursor.h"
+#include "backends/meta-cursor-xcursor.h"
 #include "backends/meta-stage-private.h"
 #include "backends/x11/meta-backend-x11.h"
 
@@ -68,12 +68,12 @@ create_blank_cursor (Display *xdisplay)
 }
 
 static Cursor
-create_x_cursor (Display    *xdisplay,
-                 MetaCursor  cursor)
+create_x_cursor (Display           *xdisplay,
+                 ClutterCursorType  cursor)
 {
   Cursor result;
 
-  if (cursor == META_CURSOR_NONE)
+  if (cursor == CLUTTER_CURSOR_NONE)
     return create_blank_cursor (xdisplay);
 
   result = XcursorLibraryLoadCursor (xdisplay, meta_cursor_get_name (cursor));
@@ -85,7 +85,7 @@ create_x_cursor (Display    *xdisplay,
 
 static gboolean
 meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
-                                        MetaCursorSprite   *cursor_sprite)
+                                        ClutterCursor      *cursor_sprite)
 {
   MetaCursorRendererX11 *x11 = META_CURSOR_RENDERER_X11 (renderer);
   MetaBackend *backend = meta_cursor_renderer_get_backend (renderer);
@@ -96,20 +96,20 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
   if (xwindow == None)
     {
       if (cursor_sprite)
-        meta_cursor_sprite_realize_texture (cursor_sprite);
+        clutter_cursor_realize_texture (cursor_sprite);
       return TRUE;
     }
 
   gboolean has_server_cursor = FALSE;
 
-  if (cursor_sprite && META_IS_CURSOR_SPRITE_XCURSOR (cursor_sprite))
+  if (cursor_sprite && META_IS_CURSOR_XCURSOR (cursor_sprite))
     {
-      MetaCursorSpriteXcursor *sprite_xcursor =
-        META_CURSOR_SPRITE_XCURSOR (cursor_sprite);
-      MetaCursor cursor;
+      MetaCursorXcursor *sprite_xcursor =
+        META_CURSOR_XCURSOR (cursor_sprite);
+      ClutterCursorType cursor;
 
-      cursor = meta_cursor_sprite_xcursor_get_cursor (sprite_xcursor);
-      if (cursor != META_CURSOR_INVALID)
+      cursor = meta_cursor_xcursor_get_cursor (sprite_xcursor);
+      if (cursor != CLUTTER_CURSOR_INHERIT)
         {
           Cursor xcursor;
 
@@ -136,7 +136,7 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
     }
 
   if (cursor_sprite)
-    meta_cursor_sprite_realize_texture (cursor_sprite);
+    clutter_cursor_realize_texture (cursor_sprite);
 
   return !x11->server_cursor_visible;
 }
