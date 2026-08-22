@@ -106,14 +106,14 @@ update_cursor_timeout (gpointer user_data)
   MetaCursorRenderer *cursor_renderer =
     meta_backend_get_cursor_renderer (backend);
   gboolean cursor_changed;
-  MetaCursorSprite *cursor_sprite;
+  ClutterCursor *cursor_sprite;
 
   update_position (tracker_x11);
 
   cursor_changed = ensure_xfixes_cursor (tracker_x11);
 
   if (tracker_x11->xfixes_cursor)
-    cursor_sprite = META_CURSOR_SPRITE (tracker_x11->xfixes_cursor);
+    cursor_sprite = CLUTTER_CURSOR (tracker_x11->xfixes_cursor);
   else
     cursor_sprite = NULL;
 
@@ -151,14 +151,14 @@ meta_cursor_tracker_x11_set_force_track_position (MetaCursorTracker *tracker,
     }
 }
 
-static MetaCursorSprite *
+static ClutterCursor *
 meta_cursor_tracker_x11_get_sprite (MetaCursorTracker *tracker)
 {
   MetaCursorTrackerX11 *tracker_x11 = META_CURSOR_TRACKER_X11 (tracker);
 
   ensure_xfixes_cursor (META_CURSOR_TRACKER_X11 (tracker));
   if (tracker_x11->xfixes_cursor)
-    return META_CURSOR_SPRITE (tracker_x11->xfixes_cursor);
+    return CLUTTER_CURSOR (tracker_x11->xfixes_cursor);
   else
     return NULL;
 }
