@@ -665,10 +665,11 @@ create_device (MetaSeatX11    *seat_x11,
     }
 
   /* Used to also record a CLUTTER_INPUT_MODE_LOGICAL/PHYSICAL/FLOATING
-   * classification here (from info->use: XIMaster*/XISlave*/XIFloatingSlave)
-   * and pass it via a "device-mode" construct property, but neither
-   * ClutterInputMode nor that property exist any more - dropped along
-   * with the rest of X11 support, with nothing replacing the concept. */
+   * classification here (from info->use: XIMaster..., XISlave...,
+   * XIFloatingSlave) and pass it via a "device-mode" construct property,
+   * but neither ClutterInputMode nor that property exist any more -
+   * dropped along with the rest of X11 support, with nothing replacing
+   * the concept. */
 
   if (info->use != XIMasterKeyboard &&
       info->use != XIMasterPointer)
