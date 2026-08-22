@@ -114,6 +114,8 @@ void meta_window_x11_check_update_resize (MetaWindow *window);
 
 gboolean meta_window_x11_has_alpha_channel (MetaWindow *window);
 
+gboolean meta_window_x11_can_unredirect (MetaWindowX11 *window_x11);
+
 META_EXPORT
 Window meta_window_x11_get_xwindow (MetaWindow *window);
 
