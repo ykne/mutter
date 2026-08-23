@@ -620,8 +620,13 @@ meta_display_cancel_touch (MetaDisplay *display)
 {
   MetaWaylandCompositor *compositor;
 
+  /* No Wayland compositor role exists under the X11 backend - see
+   * meta_context_start() - so there is no Wayland touch seat to
+   * cancel either. Public API, reachable from gnome-shell's JS side,
+   * so guard rather than assume a caller-side check. */
   compositor = wayland_compositor_from_display (display);
-  meta_wayland_touch_cancel (compositor->seat->touch);
+  if (compositor)
+    meta_wayland_touch_cancel (compositor->seat->touch);
 }
 
 static void
@@ -2500,12 +2505,17 @@ meta_display_get_pad_button_label (MetaDisplay        *display,
   if (label)
     return label;
 
-  /* Second, lookup the actions set by the clients */
+  /* Second, lookup the actions set by the clients - no Wayland
+   * compositor role (or tablet-pad protocol) exists under the X11
+   * backend, see meta_context_start(). */
   compositor = wayland_compositor_from_display (display);
-  tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager,
-                                                          compositor->seat);
-  if (tablet_seat)
-    tablet_pad = meta_wayland_tablet_seat_lookup_pad (tablet_seat, pad);
+  if (compositor)
+    {
+      tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager,
+                                                              compositor->seat);
+      if (tablet_seat)
+        tablet_pad = meta_wayland_tablet_seat_lookup_pad (tablet_seat, pad);
+    }
 
   if (tablet_pad)
     {
@@ -2539,13 +2549,18 @@ meta_display_get_pad_feature_label (MetaDisplay        *display,
   if (label)
     return label;
 
-  /* Second, lookup the actions set by the clients */
+  /* Second, lookup the actions set by the clients - no Wayland
+   * compositor role (or tablet-pad protocol) exists under the X11
+   * backend, see meta_context_start(). */
 
   compositor = wayland_compositor_from_display (display);
-  tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager,
-                                                          compositor->seat);
-  if (tablet_seat)
-    tablet_pad = meta_wayland_tablet_seat_lookup_pad (tablet_seat, pad);
+  if (compositor)
+    {
+      tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager,
+                                                              compositor->seat);
+      if (tablet_seat)
+        tablet_pad = meta_wayland_tablet_seat_lookup_pad (tablet_seat, pad);
+    }
 
   if (tablet_pad)
     {

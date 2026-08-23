@@ -1267,7 +1267,10 @@ meta_x11_display_new (MetaDisplay  *display,
 
   XSynchronize (xdisplay, !!g_getenv ("MUTTER_SYNC"));
 
-  meta_xwayland_setup_xdisplay (&compositor->xwayland_manager, xdisplay);
+  /* No Wayland compositor role (and so no XWayland manager) exists
+   * under the X11 backend - see meta_context_start(). */
+  if (compositor)
+    meta_xwayland_setup_xdisplay (&compositor->xwayland_manager, xdisplay);
 
   number = DefaultScreen (xdisplay);
 
@@ -1709,14 +1712,31 @@ update_cursor_theme (MetaX11Display *x11_display)
 {
   MetaBackend *backend = backend_from_x11_display (x11_display);
   MetaContext *context = meta_backend_get_context (backend);
-  MetaWaylandCompositor *wayland_compositor =
-    meta_context_get_wayland_compositor (context);
-  MetaXWaylandManager *xwayland_manager =
-    &wayland_compositor->xwayland_manager;
-  int scale =
-    meta_xwayland_get_x11_ui_scaling_factor (xwayland_manager);
+  int scale;
   int size;
   const char *theme;
+
+  /* Matches update_ui_scaling_factor()'s own X11-vs-Wayland split: no
+   * XWayland manager exists under the X11 backend (see
+   * meta_context_start()), so the scale comes straight from
+   * MetaSettings instead. */
+#ifdef HAVE_X11
+  if (META_IS_BACKEND_X11 (backend))
+    {
+      MetaSettings *settings = meta_backend_get_settings (backend);
+
+      scale = meta_settings_get_ui_scaling_factor (settings);
+    }
+  else
+#endif
+    {
+      MetaWaylandCompositor *wayland_compositor =
+        meta_context_get_wayland_compositor (context);
+      MetaXWaylandManager *xwayland_manager =
+        &wayland_compositor->xwayland_manager;
+
+      scale = meta_xwayland_get_x11_ui_scaling_factor (xwayland_manager);
+    }
 
   size = meta_prefs_get_cursor_size () * scale;
 
