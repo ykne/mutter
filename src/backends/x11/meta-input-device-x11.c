@@ -424,7 +424,13 @@ meta_input_device_x11_query_pointer_location (MetaInputDeviceX11 *device_xi2)
    * "if (device == NULL) return;") rather than dereferencing a NULL
    * seat. */
   if (!seat_x11)
-    return FALSE;
+    {
+      g_warning ("DEBUG query_pointer_location: seat_x11 NULL for device "
+                "'%s' (id %d), seat=%p, device=%p",
+                clutter_input_device_get_device_name (device),
+                device_xi2->device_id, seat, device);
+      return FALSE;
+    }
 
   backend_x11 = META_BACKEND_X11 (meta_seat_x11_get_backend (seat_x11));
   xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
