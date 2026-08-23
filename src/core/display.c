@@ -819,6 +819,11 @@ meta_display_new (MetaContext  *context,
   guint32 timestamp = 0;
   MetaMonitorManager *monitor_manager;
   MetaInputCapture *input_capture;
+  gboolean is_x11_backend = FALSE;
+
+#ifdef HAVE_X11
+  is_x11_backend = META_IS_BACKEND_X11 (backend);
+#endif
 
   display = g_object_new (META_TYPE_DISPLAY, NULL);
 
@@ -905,19 +910,29 @@ meta_display_new (MetaContext  *context,
 
 
 #ifdef HAVE_XWAYLAND
-  MetaWaylandCompositor *wayland_compositor =
-    wayland_compositor_from_display (display);
-  MetaX11DisplayPolicy x11_display_policy;
-
-  meta_xwayland_init_display (&wayland_compositor->xwayland_manager,
-                              display);
-
-  x11_display_policy = meta_context_get_x11_display_policy (context);
-  if (x11_display_policy == META_X11_DISPLAY_POLICY_MANDATORY)
+  /* Under the X11 backend, display->x11_display was already created
+   * synchronously above, and there is no Wayland compositor role for an
+   * XWayland server to attach to - none of this applies. Without this
+   * guard, meta_display_init_x11() unconditionally calls
+   * meta_xwayland_start_xserver() to spawn a real Xwayland process that
+   * has nothing to attach to, which either hangs or otherwise interferes
+   * with the real X11 display connection already established above. */
+  if (!is_x11_backend)
     {
-      meta_display_init_x11 (display, NULL,
-                              (GAsyncReadyCallback) on_mandatory_x11_initialized,
-                              NULL);
+      MetaWaylandCompositor *wayland_compositor =
+        wayland_compositor_from_display (display);
+      MetaX11DisplayPolicy x11_display_policy;
+
+      meta_xwayland_init_display (&wayland_compositor->xwayland_manager,
+                                  display);
+
+      x11_display_policy = meta_context_get_x11_display_policy (context);
+      if (x11_display_policy == META_X11_DISPLAY_POLICY_MANDATORY)
+        {
+          meta_display_init_x11 (display, NULL,
+                                  (GAsyncReadyCallback) on_mandatory_x11_initialized,
+                                  NULL);
+        }
     }
 #endif /* HAVE_XWAYLAND */
   timestamp = meta_display_get_current_time_roundtrip (display);
