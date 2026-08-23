@@ -1912,6 +1912,19 @@ create_guard_window (MetaX11Display *x11_display)
   meta_stack_tracker_lower (x11_display->display->stack_tracker,
                             guard_window);
 
+  /* meta_stack_tracker_lower() above only updates mutter's internal
+   * stacking model; a newly created window is placed at the top of
+   * the real X server stack regardless, and nothing here guarantees
+   * the tracker's model gets synced/flushed to the server before
+   * this InputOnly, NoEventMask window ends up sitting on top of the
+   * (fullscreen, in the X11 CM backend) stage window - silently
+   * absorbing and dropping every core XInput2 event (clicks, key
+   * presses, crossing) aimed at the desktop, since it neither selects
+   * them itself nor has a sibling below it to fall through to.
+   * Force the real, immediate restack directly rather than relying
+   * on that model eventually getting flushed. */
+  XLowerWindow (x11_display->xdisplay, guard_window);
+
   XMapWindow (x11_display->xdisplay, guard_window);
   return guard_window;
 }
