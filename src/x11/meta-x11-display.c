@@ -1695,7 +1695,20 @@ static void
 schedule_reload_x11_cursor (MetaX11Display *x11_display)
 {
   MetaDisplay *display = x11_display->display;
-  MetaLaters *laters = meta_compositor_get_laters (display->compositor);
+  MetaLaters *laters;
+
+  /* Under the X11 backend, meta_x11_display_new() runs synchronously
+   * before create_compositor() (see meta_display_new()), so
+   * display->compositor doesn't exist yet the first time this is
+   * called (from within meta_x11_display_new() itself, via
+   * update_cursor_theme()). Nothing needs redrawing before the
+   * compositor exists in the first place - the later two call sites,
+   * both well after startup, always have a real compositor to
+   * schedule against. */
+  if (!display->compositor)
+    return;
+
+  laters = meta_compositor_get_laters (display->compositor);
 
   if (x11_display->reload_x11_cursor_later)
     return;
