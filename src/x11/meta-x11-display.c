@@ -51,6 +51,9 @@
 #include "backends/meta-cursor-xcursor.h"
 #include "backends/meta-logical-monitor-private.h"
 #include "backends/meta-settings-private.h"
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#endif
 #include "core/meta-workspace-manager-private.h"
 #include "core/util-private.h"
 #include "core/workspace-private.h"
@@ -1060,9 +1063,21 @@ static const char *
 get_display_name (MetaDisplay *display)
 {
   MetaContext *context = meta_display_get_context (display);
-  MetaWaylandCompositor *compositor =
-    meta_context_get_wayland_compositor (context);
+  MetaWaylandCompositor *compositor;
 
+#ifdef HAVE_X11
+  /* Under the X11 backend there is no XWayland to have a private display
+   * name for - a MetaWaylandCompositor object always exists regardless of
+   * backend (created unconditionally in meta_context_start()), so the
+   * compositor-not-NULL check below can't be used to detect that case. Go
+   * straight for the real $DISPLAY the X server we're actually connecting
+   * to was started on. */
+  MetaBackend *backend = meta_context_get_backend (context);
+  if (META_IS_BACKEND_X11 (backend))
+    return g_getenv ("DISPLAY");
+#endif
+
+  compositor = meta_context_get_wayland_compositor (context);
   if (compositor)
     return meta_wayland_get_private_xwayland_display_name (compositor);
   else
