@@ -134,9 +134,16 @@ meta_display_handle_event (MetaDisplay        *display,
   MetaWaylandTextInput *wayland_text_input = NULL;
   uint32_t time_ms;
 
+  /* No Wayland compositor role exists under the X11 backend (see
+   * meta_context_start()) - text-input routing is a Wayland protocol
+   * concept, wayland_text_input just stays NULL, same as its
+   * declaration default. */
   wayland_compositor = meta_context_get_wayland_compositor (context);
-  wayland_text_input =
-    meta_wayland_compositor_get_text_input (wayland_compositor);
+  if (wayland_compositor)
+    {
+      wayland_text_input =
+        meta_wayland_compositor_get_text_input (wayland_compositor);
+    }
 
   COGL_TRACE_BEGIN_SCOPED (MetaDisplayHandleEvent,
                            "Meta::Display::handle_event()");
@@ -174,7 +181,8 @@ meta_display_handle_event (MetaDisplay        *display,
       !clutter_event_get_device_tool (event))
     meta_display_handle_sticky_mouse_focus_event (display, event);
 
-  meta_wayland_compositor_update (wayland_compositor, event);
+  if (wayland_compositor)
+    meta_wayland_compositor_update (wayland_compositor, event);
 
   if (event_type == CLUTTER_PAD_BUTTON_PRESS ||
       event_type == CLUTTER_PAD_BUTTON_RELEASE ||
@@ -307,7 +315,8 @@ meta_display_handle_event (MetaDisplay        *display,
       time_ms != CLUTTER_CURRENT_TIME)
     meta_window_check_alive_on_event (window, time_ms);
 
-  if (meta_wayland_compositor_handle_event (wayland_compositor, event))
+  if (wayland_compositor &&
+      meta_wayland_compositor_handle_event (wayland_compositor, event))
     return CLUTTER_EVENT_STOP;
 
   return CLUTTER_EVENT_PROPAGATE;
