@@ -31,6 +31,9 @@
 #include "core/util-private.h"
 #include "meta/meta-enums.h"
 #include "wayland/meta-wayland.h"
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#endif
 
 #ifdef HAVE_PROFILER
 #include "core/meta-profiler.h"
@@ -464,7 +467,20 @@ meta_context_start (MetaContext  *context,
 
   meta_prefs_init ();
 
-  priv->wayland_compositor = meta_wayland_compositor_new (context);
+  /* Restored alongside the X11 backend: upstream unconditionally
+   * constructs the Wayland compositor here after "Drop the X11 backend"
+   * removed the compositor-type check around it (originally
+   * `if (compositor_type == META_COMPOSITOR_TYPE_WAYLAND)`, using an
+   * enum this fork's base predates the removal of too). Under the X11
+   * backend there is no Wayland compositor role at all - confirmed via
+   * a real Fedora 44 VM that constructing one anyway silently sets up
+   * XWayland-related listening sockets nothing ever services, which
+   * ultimately deadlocked the real X11 display connection opened later
+   * in meta_display_new(). */
+#ifdef HAVE_X11
+  if (!META_IS_BACKEND_X11 (meta_context_get_backend (context)))
+#endif
+    priv->wayland_compositor = meta_wayland_compositor_new (context);
 
   plugin_options = g_steal_pointer (&priv->plugin_options),
   priv->display = meta_display_new (context, plugin_options, error);

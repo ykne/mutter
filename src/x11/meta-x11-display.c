@@ -140,12 +140,22 @@ stage_to_protocol (MetaX11Display *x11_display,
   MetaContext *context = meta_display_get_context (display);
   int scale = 1;
 
-  MetaWaylandCompositor *wayland_compositor =
-    meta_context_get_wayland_compositor (context);
-  MetaXWaylandManager *xwayland_manager =
-    &wayland_compositor->xwayland_manager;
+  /* Under the X11 backend there is no Wayland compositor role (see
+   * meta_context_start()), so there is no XWayland scale to read either
+   * - the X11 display already operates in real (unscaled) protocol
+   * coordinates, matching upstream's original
+   * META_COMPOSITOR_TYPE_X11 case (scale left at its default of 1). */
+#ifdef HAVE_X11
+  if (!META_IS_BACKEND_X11 (meta_context_get_backend (context)))
+#endif
+    {
+      MetaWaylandCompositor *wayland_compositor =
+        meta_context_get_wayland_compositor (context);
+      MetaXWaylandManager *xwayland_manager =
+        &wayland_compositor->xwayland_manager;
 
-  scale = meta_xwayland_get_effective_scale (xwayland_manager);
+      scale = meta_xwayland_get_effective_scale (xwayland_manager);
+    }
 
   if (protocol_x)
     *protocol_x = stage_x * scale;
@@ -204,12 +214,30 @@ update_ui_scaling_factor (MetaX11Display *x11_display)
     meta_x11_display_get_instance_private (x11_display);
   MetaBackend *backend = backend_from_x11_display (x11_display);
   MetaContext *context = meta_backend_get_context (backend);
-  MetaWaylandCompositor *wayland_compositor =
-    meta_context_get_wayland_compositor (context);
-  MetaXWaylandManager *xwayland_manager =
-    &wayland_compositor->xwayland_manager;
-  int ui_scaling_factor =
-    meta_xwayland_get_x11_ui_scaling_factor (xwayland_manager);
+  int ui_scaling_factor;
+
+  /* Matches upstream's original META_COMPOSITOR_TYPE_X11 case: no
+   * XWayland manager exists under the X11 backend (see
+   * meta_context_start()), so the UI scaling factor comes straight from
+   * MetaSettings instead. */
+#ifdef HAVE_X11
+  if (META_IS_BACKEND_X11 (backend))
+    {
+      MetaSettings *settings = meta_backend_get_settings (backend);
+
+      ui_scaling_factor = meta_settings_get_ui_scaling_factor (settings);
+    }
+  else
+#endif
+    {
+      MetaWaylandCompositor *wayland_compositor =
+        meta_context_get_wayland_compositor (context);
+      MetaXWaylandManager *xwayland_manager =
+        &wayland_compositor->xwayland_manager;
+
+      ui_scaling_factor =
+        meta_xwayland_get_x11_ui_scaling_factor (xwayland_manager);
+    }
 
   meta_dbus_x11_set_ui_scaling_factor (priv->dbus_api, ui_scaling_factor);
 }
