@@ -1707,8 +1707,13 @@ meta_compositor_query_pointer_a11y (MetaCompositor    *compositor,
 
   sprite = clutter_backend_get_pointer_sprite (clutter_backend, stage);
 
-  window = meta_wayland_compositor_get_current_window (wayland_compositor,
-                                                       sprite, &rel_coords);
+  /* No Wayland compositor role exists under the X11 backend (see
+   * meta_context_start()) - fall through to the "our own chrome" path
+   * below, same as when there's simply no window under the pointer. */
+  window = wayland_compositor
+    ? meta_wayland_compositor_get_current_window (wayland_compositor,
+                                                  sprite, &rel_coords)
+    : NULL;
 
   g_variant_builder_init (&app_data_builder, G_VARIANT_TYPE ("a{sv}"));
 

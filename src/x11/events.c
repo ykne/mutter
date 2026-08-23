@@ -1848,9 +1848,12 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
       goto out;
     }
 
+  /* No Wayland compositor role (and so no XWayland manager) exists
+   * under the X11 backend - see meta_context_start(). */
   wayland_compositor = meta_context_get_wayland_compositor (context);
 
-  if (meta_xwayland_manager_handle_xevent (&wayland_compositor->xwayland_manager,
+  if (wayland_compositor &&
+      meta_xwayland_manager_handle_xevent (&wayland_compositor->xwayland_manager,
                                            event))
     {
       bypass_compositor = TRUE;
