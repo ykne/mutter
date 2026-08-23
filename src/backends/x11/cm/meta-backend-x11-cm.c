@@ -27,6 +27,7 @@
 #include "backends/meta-backend-private.h"
 #include "backends/meta-dnd-private.h"
 #include "backends/meta-keymap-description-private.h"
+#include "backends/meta-stage-private.h"
 #include "backends/x11/meta-barrier-x11.h"
 #include "backends/x11/meta-cursor-renderer-x11.h"
 #include "backends/x11/meta-cursor-tracker-x11.h"
@@ -217,15 +218,18 @@ meta_backend_x11_cm_get_input_settings (MetaBackend *backend)
 static void
 meta_backend_x11_cm_update_stage (MetaBackend *backend)
 {
-  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
-  Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
-  Window xwin = meta_backend_x11_get_xwindow (x11);
-  MetaMonitorManager *monitor_manager =
-    meta_backend_get_monitor_manager (backend);
-  int width, height;
+  ClutterActor *stage = meta_backend_get_stage (backend);
 
-  meta_monitor_manager_get_screen_size (monitor_manager, &width, &height);
-  XResizeWindow (xdisplay, xwin, width, height);
+  /* clutter_actor_set_size() (via meta_stage_rebuild_views()) drives the
+   * stage's own X11 window (and stage view rebuild) through the normal
+   * Clutter allocation cycle. A bare XResizeWindow() on the stage's
+   * xwindow (as this used to do) changes the server-side geometry
+   * without ever updating Clutter's own actor allocation, leaving the
+   * stage window's tracked size stuck at its initial tiny placeholder -
+   * which also breaks get_event_stage()'s window lookup for every
+   * non-raw XInput2 event (clicks, key presses), since real input never
+   * lands within a 1x1 window. */
+  meta_stage_rebuild_views (META_STAGE (stage));
 }
 
 static void
