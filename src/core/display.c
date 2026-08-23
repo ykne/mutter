@@ -44,6 +44,10 @@
 #include "compositor/compositor-private.h"
 #include "compositor/meta-compositor-native.h"
 #include "compositor/meta-compositor-server.h"
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#include "compositor/meta-compositor-x11.h"
+#endif
 #include "cogl/cogl.h"
 #include "core/bell.h"
 #include "core/boxes-private.h"
@@ -596,6 +600,10 @@ create_compositor (MetaDisplay *display)
 #ifdef HAVE_NATIVE_BACKEND
   if (META_IS_BACKEND_NATIVE (backend))
     return META_COMPOSITOR (meta_compositor_native_new (display, backend));
+#endif
+#ifdef HAVE_X11
+  if (META_IS_BACKEND_X11 (backend))
+    return META_COMPOSITOR (meta_compositor_x11_new (display, backend));
 #endif
   g_assert_not_reached ();
 }
