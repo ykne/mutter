@@ -386,6 +386,57 @@ apply_keymap (MetaBackendX11 *x11)
   g_free (rules_file_path);
 }
 
+static MetaKeymapDescription *
+meta_backend_x11_cm_get_keymap_description (MetaBackend *backend)
+{
+  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
+
+  /* If set_keymap_async() has already run at least once, its rule
+   * strings mirror the current server-side keymap exactly (see
+   * apply_keymap() above) - reuse those directly rather than
+   * round-tripping through the X server again. */
+  if (x11_cm->keymap_layouts &&
+      x11_cm->keymap_variants &&
+      x11_cm->keymap_options &&
+      x11_cm->keymap_model)
+    {
+      return meta_keymap_description_new_from_rules (x11_cm->keymap_model,
+                                                      x11_cm->keymap_layouts,
+                                                      x11_cm->keymap_variants,
+                                                      x11_cm->keymap_options,
+                                                      NULL, NULL);
+    }
+  else
+    {
+      Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+      XkbRF_VarDefsRec var_defs = { 0 };
+      char *rules = NULL;
+      MetaKeymapDescription *description;
+
+      /* Nothing has been explicitly set yet (e.g. right at session
+       * startup) - read whatever rules are currently active on the X
+       * server's _XKB_RULES_NAMES root window property. */
+      if (!XkbRF_GetNamesProp (xdisplay, &rules, &var_defs) || !rules)
+        {
+          var_defs.model = NULL;
+          var_defs.layout = NULL;
+          var_defs.variant = NULL;
+          var_defs.options = NULL;
+        }
+      free (rules);
+
+      description = meta_keymap_description_new_from_rules (var_defs.model,
+                                                             var_defs.layout,
+                                                             var_defs.variant,
+                                                             var_defs.options,
+                                                             NULL, NULL);
+      free_xkbrf_var_defs (&var_defs);
+
+      return description;
+    }
+}
+
 static void
 meta_backend_x11_cm_set_keymap_async (MetaBackend           *backend,
                                       MetaKeymapDescription *description,
@@ -565,6 +616,7 @@ meta_backend_x11_cm_class_init (MetaBackendX11CmClass *klass)
   backend_class->update_stage = meta_backend_x11_cm_update_stage;
   backend_class->select_stage_events = meta_backend_x11_cm_select_stage_events;
   backend_class->set_keymap_async = meta_backend_x11_cm_set_keymap_async;
+  backend_class->get_keymap_description = meta_backend_x11_cm_get_keymap_description;
 
   backend_x11_class->handle_host_xevent = meta_backend_x11_cm_handle_host_xevent;
   backend_x11_class->translate_device_event = meta_backend_x11_cm_translate_device_event;
