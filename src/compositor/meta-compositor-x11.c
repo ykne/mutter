@@ -181,6 +181,20 @@ meta_compositor_x11_manage (MetaCompositor  *compositor,
 
   determine_server_clock_source (compositor_x11);
 
+  /* composite_overlay_window is declared on MetaX11Display and torn down
+   * on shutdown (XCompositeReleaseOverlayWindow(), meta-x11-display.c),
+   * but nothing ever called the matching acquisition function - it
+   * stayed permanently None (its init value), so the reparent below
+   * targeted a nonexistent window and X reported BadWindow back once
+   * the connection synced. Acquire it here, the only place it's
+   * actually used, now that the COMPOSITE extension is confirmed
+   * present (checked just above). */
+  if (display->x11_display->composite_overlay_window == None)
+    {
+      display->x11_display->composite_overlay_window =
+        XCompositeGetOverlayWindow (xdisplay, x11_display->xroot);
+    }
+
   compositor_x11->output = display->x11_display->composite_overlay_window;
 
   xwindow = meta_backend_x11_get_xwindow (META_BACKEND_X11 (backend));
