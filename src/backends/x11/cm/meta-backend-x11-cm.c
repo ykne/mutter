@@ -240,6 +240,8 @@ meta_backend_x11_cm_update_stage (MetaBackend *backend)
    * to actually cover the screen, not remain at its initial tiny
    * placeholder size. */
   meta_monitor_manager_get_screen_size (monitor_manager, &width, &height);
+  g_debug ("meta_backend_x11_cm_update_stage: screen %dx%d, stage=%p",
+           width, height, stage);
 
   /* _clutter_stage_window_resize() is clutter-internal (not
    * CLUTTER_EXPORT-ed), so it isn't linkable from here across the
@@ -250,8 +252,13 @@ meta_backend_x11_cm_update_stage (MetaBackend *backend)
     ClutterStageWindow *stage_window =
       _clutter_stage_get_window (CLUTTER_STAGE (stage));
 
-    CLUTTER_STAGE_WINDOW_GET_CLASS (stage_window)->resize (stage_window,
-                                                           width, height);
+    g_debug ("meta_backend_x11_cm_update_stage: stage_window=%p resize=%p",
+             stage_window,
+             stage_window ? CLUTTER_STAGE_WINDOW_GET_CLASS (stage_window)->resize : NULL);
+
+    if (stage_window)
+      CLUTTER_STAGE_WINDOW_GET_CLASS (stage_window)->resize (stage_window,
+                                                             width, height);
   }
 }
 
