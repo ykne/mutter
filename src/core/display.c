@@ -882,25 +882,6 @@ meta_display_new (MetaContext  *context,
                                        disable_input_capture,
                                        display);
 
-#ifdef HAVE_X11
-  /* Under the X11 backend, the X11 display *is* the (only) display, so it
-   * has to exist before create_compositor() below - unlike the XWayland
-   * case elsewhere in this function, where x11_display is created lazily,
-   * asynchronously, well after the compositor is already running. */
-  if (META_IS_BACKEND_X11 (backend))
-    {
-      MetaX11Display *x11_display;
-
-      x11_display = meta_x11_display_new (display, error);
-      if (!x11_display)
-        return NULL;
-
-      display->x11_display = x11_display;
-      g_signal_emit (display, display_signals[X11_DISPLAY_SETUP], 0);
-      meta_x11_display_create_guard_window (x11_display);
-    }
-#endif
-
   display->compositor = create_compositor (display);
 
   display->stack = meta_stack_new (display);
@@ -915,13 +896,13 @@ meta_display_new (MetaContext  *context,
 
 
 #ifdef HAVE_XWAYLAND
-  /* Under the X11 backend, display->x11_display was already created
-   * synchronously above, and there is no Wayland compositor role for an
-   * XWayland server to attach to - none of this applies. Without this
-   * guard, meta_display_init_x11() unconditionally calls
+  /* Under the X11 backend there is no Wayland compositor role for an
+   * XWayland server to attach to (x11_display is set up synchronously
+   * just below instead) - none of this applies. Without this guard,
+   * meta_display_init_x11() unconditionally calls
    * meta_xwayland_start_xserver() to spawn a real Xwayland process that
    * has nothing to attach to, which either hangs or otherwise interferes
-   * with the real X11 display connection already established above. */
+   * with the real X11 display connection established below. */
   if (!is_x11_backend)
     {
       MetaWaylandCompositor *wayland_compositor =
@@ -940,6 +921,41 @@ meta_display_new (MetaContext  *context,
         }
     }
 #endif /* HAVE_XWAYLAND */
+
+#ifdef HAVE_X11
+  /* Under the X11 backend, the X11 display *is* the (only) display, so
+   * it has to exist before meta_compositor_manage() below (whose X11
+   * implementation, meta_compositor_x11_manage(), dereferences
+   * display->x11_display directly) - unlike the XWayland case above,
+   * where x11_display is created lazily, asynchronously, well after
+   * the compositor is already running.
+   *
+   * This has to happen here, after create_compositor() *and* after
+   * workspace_manager/stack/bell/selection are all already created
+   * above - meta_x11_display_new() itself reaches back into all of
+   * them (e.g. meta_x11_display_update_workspace_layout() reads
+   * display->workspace_manager, schedule_reload_x11_cursor() reads
+   * display->compositor's MetaLaters) exactly like the async XWayland
+   * path already assumes, since in that path meta_display_init_x11()
+   * is never called until long after meta_display_new() has fully
+   * returned. */
+  if (is_x11_backend)
+    {
+      MetaX11Display *x11_display;
+
+      x11_display = meta_x11_display_new (display, error);
+      if (!x11_display)
+        {
+          g_object_unref (display);
+          return NULL;
+        }
+
+      display->x11_display = x11_display;
+      g_signal_emit (display, display_signals[X11_DISPLAY_SETUP], 0);
+      meta_x11_display_create_guard_window (x11_display);
+    }
+#endif
+
   timestamp = meta_display_get_current_time_roundtrip (display);
 
 
