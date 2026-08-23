@@ -20,6 +20,8 @@
 #include "config.h"
 
 #include "backends/x11/meta-sprite-x11.h"
+#include "backends/meta-backend-private.h"
+#include "backends/meta-cursor-renderer.h"
 
 G_DEFINE_TYPE (MetaSpriteX11, meta_sprite_x11, META_TYPE_SPRITE)
 
@@ -29,6 +31,23 @@ meta_sprite_x11_init (MetaSpriteX11 *sprite_x11)
 }
 
 static void
+meta_sprite_x11_update_from_event (ClutterFocus       *focus,
+                                   const ClutterEvent *event)
+{
+  ClutterSprite *sprite = CLUTTER_SPRITE (focus);
+  MetaBackend *backend = meta_sprite_get_backend (META_SPRITE (focus));
+  MetaCursorRenderer *cursor_renderer;
+
+  cursor_renderer =
+    meta_backend_get_cursor_renderer_for_sprite (backend, sprite);
+  if (cursor_renderer)
+    meta_cursor_renderer_update_position (cursor_renderer);
+}
+
+static void
 meta_sprite_x11_class_init (MetaSpriteX11Class *klass)
 {
+  ClutterFocusClass *focus_class = CLUTTER_FOCUS_CLASS (klass);
+
+  focus_class->update_from_event = meta_sprite_x11_update_from_event;
 }
