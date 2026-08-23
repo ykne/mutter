@@ -145,6 +145,10 @@ meta_stage_x11_resize (ClutterStageWindow *stage_window,
 {
   MetaStageX11 *stage_x11 = META_STAGE_X11 (stage_window);
 
+  g_debug ("meta_stage_x11_resize: %dx%d, xwin=0x%lx, cached=%dx%d",
+           width, height, (unsigned long) stage_x11->xwin,
+           stage_x11->xwin_width, stage_x11->xwin_height);
+
   if (width == 0 || height == 0)
     {
       /* Should not happen, if this turns up we need to debug it and
@@ -163,6 +167,9 @@ meta_stage_x11_resize (ClutterStageWindow *stage_window,
           height != stage_x11->xwin_height)
         {
           Display *xdisplay = xdisplay_from_stage (stage_x11);
+
+          g_debug ("meta_stage_x11_resize: XResizeWindow(0x%lx, %d, %d)",
+                   (unsigned long) stage_x11->xwin, width, height);
 
           /* XXX: in this case we can rely on a subsequent
            * ConfigureNotify that will result in the stage
