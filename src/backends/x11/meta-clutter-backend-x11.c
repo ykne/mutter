@@ -154,7 +154,7 @@ lookup_sprite (ClutterBackend       *clutter_backend,
             g_object_new (sprite_type,
                           "backend", priv->backend,
                           "stage", stage,
-                          "device", device,
+                          "sprite-device", device,
                           "sequence", sequence,
                           NULL);
 
@@ -177,7 +177,7 @@ lookup_sprite (ClutterBackend       *clutter_backend,
             g_object_new (sprite_type,
                           "backend", priv->backend,
                           "stage", stage,
-                          "device", device,
+                          "sprite-device", device,
                           "sequence", sequence,
                           NULL);
         }

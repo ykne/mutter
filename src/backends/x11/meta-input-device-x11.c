@@ -412,25 +412,18 @@ meta_input_device_x11_query_pointer_location (MetaInputDeviceX11 *device_xi2)
   MetaBackendX11 *backend_x11;
   Display *xdisplay;
 
-  /* A real Fedora 44 VM test hit a NULL seat here on a raw XInput2
-   * event (XI_RawMotion) - this device-construction code path (see
-   * create_device(), meta-seat-x11.c) always passes a real "seat"
-   * construct property, so this shouldn't normally happen, but this
-   * whole X11 raw-event code path likely hasn't been runtime-tested in
-   * years (nobody upstream runs X11 sessions any more) and clearly has
-   * its own latent bugs independent of anything this restoration
-   * touched. Bail out the same way the caller already does for an
+  /* Defensive: bail out the same way the caller already does for an
    * unrecognized device (translate_raw_event(), meta-seat-x11.c:
    * "if (device == NULL) return;") rather than dereferencing a NULL
-   * seat. */
+   * seat, in case some future device construction path ever leaves
+   * "seat" unset. Root cause of the one real instance of this found
+   * during testing (the X11 master pointer permanently had a NULL
+   * seat) was an invalid "has-cursor" property name earlier in the
+   * same g_object_new() call as "seat" in create_device()
+   * (meta-seat-x11.c) silently corrupting that call's construct-time
+   * property parsing - fixed there, not here. */
   if (!seat_x11)
-    {
-      g_warning ("DEBUG query_pointer_location: seat_x11 NULL for device "
-                "'%s' (id %d), seat=%p, device=%p",
-                clutter_input_device_get_device_name (device),
-                device_xi2->device_id, seat, device);
-      return FALSE;
-    }
+    return FALSE;
 
   backend_x11 = META_BACKEND_X11 (meta_seat_x11_get_backend (seat_x11));
   xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
