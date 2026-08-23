@@ -872,6 +872,25 @@ meta_display_new (MetaContext  *context,
                                        disable_input_capture,
                                        display);
 
+#ifdef HAVE_X11
+  /* Under the X11 backend, the X11 display *is* the (only) display, so it
+   * has to exist before create_compositor() below - unlike the XWayland
+   * case elsewhere in this function, where x11_display is created lazily,
+   * asynchronously, well after the compositor is already running. */
+  if (META_IS_BACKEND_X11 (backend))
+    {
+      MetaX11Display *x11_display;
+
+      x11_display = meta_x11_display_new (display, error);
+      if (!x11_display)
+        return NULL;
+
+      display->x11_display = x11_display;
+      g_signal_emit (display, display_signals[X11_DISPLAY_SETUP], 0);
+      meta_x11_display_create_guard_window (x11_display);
+    }
+#endif
+
   display->compositor = create_compositor (display);
 
   display->stack = meta_stack_new (display);
