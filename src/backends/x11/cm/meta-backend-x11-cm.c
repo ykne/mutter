@@ -28,6 +28,8 @@
 #include "backends/meta-dnd-private.h"
 #include "backends/meta-keymap-description-private.h"
 #include "backends/meta-stage-private.h"
+#include "clutter/clutter-stage-private.h"
+#include "clutter/clutter-stage-window.h"
 #include "backends/x11/meta-barrier-x11.h"
 #include "backends/x11/meta-cursor-renderer-x11.h"
 #include "backends/x11/meta-cursor-tracker-x11.h"
@@ -219,17 +221,38 @@ static void
 meta_backend_x11_cm_update_stage (MetaBackend *backend)
 {
   ClutterActor *stage = meta_backend_get_stage (backend);
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  int width, height;
 
-  /* clutter_actor_set_size() (via meta_stage_rebuild_views()) drives the
-   * stage's own X11 window (and stage view rebuild) through the normal
-   * Clutter allocation cycle. A bare XResizeWindow() on the stage's
-   * xwindow (as this used to do) changes the server-side geometry
-   * without ever updating Clutter's own actor allocation, leaving the
-   * stage window's tracked size stuck at its initial tiny placeholder -
-   * which also breaks get_event_stage()'s window lookup for every
-   * non-raw XInput2 event (clicks, key presses), since real input never
-   * lands within a 1x1 window. */
   meta_stage_rebuild_views (META_STAGE (stage));
+
+  /* clutter_actor_set_size() inside meta_stage_rebuild_views() only
+   * queues a relayout; the stage's own X11 window (and its tracked
+   * xwin_width/xwin_height) only actually gets resized once a real
+   * Clutter allocation cycle runs, which depends on frame-clock
+   * timing. Resize the stage window directly and synchronously here
+   * instead - this is what used to be a bare XResizeWindow() on the
+   * same window, except going through the stage window's own resize
+   * vfunc keeps its internally tracked size in sync too, which matters
+   * for get_event_stage()'s window lookup in meta-seat-x11.c: every
+   * non-raw XInput2 event (clicks, key presses) needs the stage window
+   * to actually cover the screen, not remain at its initial tiny
+   * placeholder size. */
+  meta_monitor_manager_get_screen_size (monitor_manager, &width, &height);
+
+  /* _clutter_stage_window_resize() is clutter-internal (not
+   * CLUTTER_EXPORT-ed), so it isn't linkable from here across the
+   * clutter/backends library boundary. Its body is nothing more than
+   * a class vfunc dispatch, which we can do ourselves: the class
+   * struct and CLUTTER_TYPE_STAGE_WINDOW's GType are both public. */
+  {
+    ClutterStageWindow *stage_window =
+      _clutter_stage_get_window (CLUTTER_STAGE (stage));
+
+    CLUTTER_STAGE_WINDOW_GET_CLASS (stage_window)->resize (stage_window,
+                                                           width, height);
+  }
 }
 
 static void
