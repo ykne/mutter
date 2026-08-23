@@ -84,7 +84,15 @@ meta_renderer_x11_cm_rebuild_views (MetaRenderer *renderer)
 {
   MetaRendererX11Cm *renderer_x11_cm = META_RENDERER_X11_CM (renderer);
 
-  g_return_if_fail (!meta_renderer_get_views (renderer));
+  /* Unlike the per-monitor-view backends, CM mode has exactly one
+   * static screen_view (its size is updated in place by
+   * meta_renderer_x11_cm_resize(), never destroyed/recreated), so
+   * rebuilding is a no-op past the first call - asserting the views
+   * list must still be empty here breaks every call after the first
+   * (e.g. from meta_backend_monitors_changed() -> update_stage()). */
+  if (g_list_find (meta_renderer_get_views (renderer),
+                   renderer_x11_cm->screen_view))
+    return;
 
   meta_renderer_add_view (renderer, renderer_x11_cm->screen_view);
 }
