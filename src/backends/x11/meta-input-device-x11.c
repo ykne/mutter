@@ -409,9 +409,25 @@ meta_input_device_x11_query_pointer_location (MetaInputDeviceX11 *device_xi2)
   ClutterInputDevice *device = CLUTTER_INPUT_DEVICE (device_xi2);
   ClutterSeat *seat = clutter_input_device_get_seat (device);
   MetaSeatX11 *seat_x11 = META_SEAT_X11 (seat);
-  MetaBackendX11 *backend_x11 =
-    META_BACKEND_X11 (meta_seat_x11_get_backend (seat_x11));
-  Display *xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
+  MetaBackendX11 *backend_x11;
+  Display *xdisplay;
+
+  /* A real Fedora 44 VM test hit a NULL seat here on a raw XInput2
+   * event (XI_RawMotion) - this device-construction code path (see
+   * create_device(), meta-seat-x11.c) always passes a real "seat"
+   * construct property, so this shouldn't normally happen, but this
+   * whole X11 raw-event code path likely hasn't been runtime-tested in
+   * years (nobody upstream runs X11 sessions any more) and clearly has
+   * its own latent bugs independent of anything this restoration
+   * touched. Bail out the same way the caller already does for an
+   * unrecognized device (translate_raw_event(), meta-seat-x11.c:
+   * "if (device == NULL) return;") rather than dereferencing a NULL
+   * seat. */
+  if (!seat_x11)
+    return FALSE;
+
+  backend_x11 = META_BACKEND_X11 (meta_seat_x11_get_backend (seat_x11));
+  xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
   Window xroot_window, xchild_window;
   double xroot_x, xroot_y, xwin_x, xwin_y;
   XIButtonState button_state = { 0 };
