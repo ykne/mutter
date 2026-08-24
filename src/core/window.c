@@ -1831,9 +1831,33 @@ meta_window_showing_on_its_workspace (MetaWindow *window)
 static gboolean
 window_has_buffer (MetaWindow *window)
 {
-  MetaWaylandSurface *surface = meta_window_get_wayland_surface (window);
-  if (!surface || !meta_wayland_surface_get_buffer (surface))
-    return FALSE;
+  /* This function was only ever written for the Wayland case: a plain
+   * X11 window (client_type X11) has no wayland surface at all
+   * (meta_window_get_wayland_surface() correctly returns NULL for
+   * one), so this always returned FALSE for X11 windows - meaning
+   * meta_compositor_show_window() (core/window.c's only caller of
+   * this, gating on !window->visible_to_compositor && window_has_
+   * buffer(window)) never ran, and the window actor's
+   * clutter_actor_show() never happened. Confirmed live: a window's
+   * surface actor had fully valid, damage-tracked texture content
+   * (visible via the overview's window-switcher, which clones actor
+   * content through a separate path not gated on the same
+   * visibility flag) while the actor itself stayed invisible on the
+   * normal desktop indefinitely.
+   *
+   * Unlike Wayland, X11 has no separate "buffer attached" signal
+   * distinct from the window simply being mapped and damage-tracked -
+   * content is implicitly present once that's true, which
+   * init_surface_actor() (meta-window-actor.c) already guarantees by
+   * the time this is ever checked. */
+  if (window->client_type == META_WINDOW_CLIENT_TYPE_X11)
+    return TRUE;
+
+  {
+    MetaWaylandSurface *surface = meta_window_get_wayland_surface (window);
+    if (!surface || !meta_wayland_surface_get_buffer (surface))
+      return FALSE;
+  }
 
   return TRUE;
 }
