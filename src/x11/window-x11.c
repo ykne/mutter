@@ -2208,6 +2208,23 @@ meta_window_x11_finalize (GObject *object)
   G_OBJECT_CLASS (meta_window_x11_parent_class)->finalize (object);
 }
 
+static MetaWaylandSurface *
+meta_window_x11_get_wayland_surface (MetaWindow *window)
+{
+  /* A plain X11 window (as opposed to an Xwayland-backed one, which
+   * overrides this in MetaWindowXwayland) never has an associated
+   * wayland surface - meta_window_get_wayland_surface() requires
+   * every MetaWindow subclass to provide this vfunc rather than
+   * leaving it unset, so provide the trivial answer here. Without
+   * this, every call hit a "klass->get_wayland_surface != NULL"
+   * assertion failure instead of a clean NULL, which left window
+   * content never actually getting composited (window management/
+   * sizing still worked, since that's a separate code path) -
+   * confirmed live: a Firefox window with entirely correct X11
+   * geometry (1400x1018+0+32) stayed completely invisible. */
+  return NULL;
+}
+
 static void
 meta_window_x11_class_init (MetaWindowX11Class *klass)
 {
@@ -2220,6 +2237,7 @@ meta_window_x11_class_init (MetaWindowX11Class *klass)
   object_class->finalize = meta_window_x11_finalize;
 
   window_class->manage = meta_window_x11_manage;
+  window_class->get_wayland_surface = meta_window_x11_get_wayland_surface;
   window_class->unmanage = meta_window_x11_unmanage;
   window_class->ping = meta_window_x11_ping;
   window_class->delete = meta_window_x11_delete;
