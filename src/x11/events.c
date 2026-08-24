@@ -32,6 +32,7 @@
 
 #include "backends/meta-cursor-tracker-private.h"
 #include "cogl/cogl.h"
+#include "compositor/meta-compositor-x11.h"
 #include "core/bell.h"
 #include "core/display-private.h"
 #include "core/meta-workspace-manager-private.h"
@@ -1826,7 +1827,7 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
 {
   MetaDisplay *display = x11_display->display;
   MetaContext *context = meta_display_get_context (display);
-  gboolean bypass_compositor G_GNUC_UNUSED = FALSE;
+  gboolean bypass_compositor = FALSE;
   XIEvent *input_event;
   MetaWaylandCompositor *wayland_compositor;
 
@@ -1897,6 +1898,22 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
     {
       if (process_selection_clear (x11_display, event))
         goto out;
+    }
+
+  /* bypass_compositor was tracked through this whole function but
+   * never actually consulted anywhere - the call that was presumably
+   * meant to gate on it, forwarding events (Damage notifications in
+   * particular) to the X11 CM backend's compositor, was missing
+   * entirely. Without it, nothing ever told the compositor that
+   * mapped/redrawn window content needed compositing: windows got
+   * managed and sized correctly, but their content (and anything else
+   * needing a repaint after the stage's own initial expose) never
+   * actually appeared on screen. See meta_compositor_x11_process_xevent()'s
+   * own handling of XDamageNotify. */
+  if (!bypass_compositor && META_IS_COMPOSITOR_X11 (display->compositor))
+    {
+      meta_compositor_x11_process_xevent (META_COMPOSITOR_X11 (display->compositor),
+                                          event, NULL);
     }
 
  out:
