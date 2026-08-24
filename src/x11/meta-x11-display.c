@@ -1728,12 +1728,18 @@ schedule_reload_x11_cursor (MetaX11Display *x11_display)
    * before create_compositor() (see meta_display_new()), so
    * display->compositor doesn't exist yet the first time this is
    * called (from within meta_x11_display_new() itself, via
-   * update_cursor_theme()). Nothing needs redrawing before the
-   * compositor exists in the first place - the later two call sites,
-   * both well after startup, always have a real compositor to
-   * schedule against. */
+   * update_cursor_theme()). The meta_laters_add() deferral below only
+   * exists to avoid tearing an in-progress compositor redraw, which
+   * can't be happening before the compositor exists - and relying on
+   * prefs-change signals (the only other two call sites) to eventually
+   * apply the initial cursor is unreliable, leaving the root window
+   * cursor unset (X's default "X" glyph) for the rest of the session
+   * if neither fires. Apply it immediately here instead. */
   if (!display->compositor)
-    return;
+    {
+      meta_x11_display_reload_cursor (x11_display);
+      return;
+    }
 
   laters = meta_compositor_get_laters (display->compositor);
 
