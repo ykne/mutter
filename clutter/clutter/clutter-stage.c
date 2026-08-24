@@ -3124,6 +3124,34 @@ clutter_stage_grab_full (ClutterStage *stage,
   return clutter_grab_new (stage, actor, owns_actor);
 }
 
+/* An X11 CM-mode backend (unlike Wayland/native) doesn't own input
+ * delivery outright: real devices stay routed by X focus/pointer
+ * ownership to whichever client window last had it, regardless of
+ * what Clutter's own grab stack says. Without an explicit windowing
+ * grab, a stage-wide ClutterGrab (e.g. the overview's modal grab)
+ * only affects in-process event routing, so events for windows other
+ * than the one X currently favors never reach the compositor - see
+ * MetaSeatX11's grab_state field/meta_seat_x11_grab(). Sync a real
+ * seat grab to the stage's aggregate is-grabbed state so device input
+ * is actually redirected while any grab is active. */
+static void
+clutter_stage_sync_seat_grab (ClutterStage *stage,
+                              gboolean      grabbed)
+{
+  ClutterContext *context;
+  ClutterBackend *backend;
+  ClutterSeat *seat;
+
+  context = clutter_actor_get_context (CLUTTER_ACTOR (stage));
+  backend = clutter_context_get_backend (context);
+  seat = clutter_backend_get_default_seat (backend);
+
+  if (grabbed)
+    clutter_seat_grab (seat, clutter_get_current_event_time ());
+  else
+    clutter_seat_ungrab (seat, clutter_get_current_event_time ());
+}
+
 /**
  * clutter_grab_activate:
  * @grab: a `ClutterGrab`
@@ -3181,7 +3209,10 @@ clutter_grab_activate (ClutterGrab *grab)
   clutter_stage_notify_grab (stage, grab, grab->next);
 
   if (was_grabbed != !!priv->topmost_grab)
-    g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_IS_GRABBED]);
+    {
+      g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_IS_GRABBED]);
+      clutter_stage_sync_seat_grab (stage, !!priv->topmost_grab);
+    }
 
   if (grab->next)
     clutter_grab_notify (grab->next);
@@ -3279,7 +3310,10 @@ clutter_stage_unlink_grab (ClutterStage *stage,
   clutter_actor_detach_grab (grab->actor, grab);
 
   if (was_grabbed != !!priv->topmost_grab)
-    g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_IS_GRABBED]);
+    {
+      g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_IS_GRABBED]);
+      clutter_stage_sync_seat_grab (stage, !!priv->topmost_grab);
+    }
 
   if (G_UNLIKELY (clutter_debug_flags & CLUTTER_DEBUG_GRABS))
     {
@@ -3334,16 +3368,15 @@ clutter_grab_get_seat_state (ClutterGrab *grab)
 {
   g_return_val_if_fail (grab != NULL, CLUTTER_GRAB_STATE_NONE);
 
-  /* The upstream X11-restoration fork this was reverted from never
-   * actually wired this up: it reads a `grab_state` field that was
-   * never added to ClutterStagePrivate, and clutter_seat_grab() (the
-   * function that would compute a real windowing-level grab state,
-   * see MetaSeatX11's grab_state field/meta_seat_x11_grab()) has no
-   * callers anywhere that would populate a per-grab value to return
-   * here. Properly wiring real per-grab seat-state tracking through
-   * ClutterGrab/ClutterSeat is unimplemented; assume the grab holds
-   * everything it asked for rather than fail to build over an X11
-   * drag-cancellation edge case. */
+  /* clutter_stage_sync_seat_grab() now calls clutter_seat_grab() (see
+   * MetaSeatX11's grab_state field/meta_seat_x11_grab()) whenever the
+   * stage's aggregate is-grabbed state goes false->true, and grabs
+   * every device together, so any active ClutterGrab does hold
+   * everything it asked for. What's still missing is real per-grab
+   * tracking (e.g. a grab created while another is already active
+   * doesn't get its own windowing-level state distinct from the
+   * stage's), so this stays a stage-wide approximation rather than a
+   * true per-grab value. */
   return CLUTTER_GRAB_STATE_ALL;
 }
 
