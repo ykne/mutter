@@ -32,6 +32,16 @@
 META_EXPORT
 gboolean meta_is_verbose  (void);
 
+/**
+ * meta_is_wayland_compositor:
+ *
+ * Returns: %TRUE if the current #MetaContext constructed a
+ *   #MetaWaylandCompositor (i.e. is not running the X11 backend),
+ *   %FALSE otherwise.
+ */
+META_EXPORT
+gboolean meta_is_wayland_compositor (void);
+
 META_EXPORT
 void meta_bug        (const char *format,
                       ...) G_GNUC_PRINTF (1, 2);

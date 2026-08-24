@@ -63,3 +63,21 @@ Window meta_x11_display_lookup_xwindow (MetaX11Display *x11_display,
 
 META_EXPORT
 MetaX11Display * meta_display_get_x11_display (MetaDisplay *display);
+
+/**
+ * meta_x11_display_set_stage_input_region:
+ * @x11_display: the #MetaX11Display
+ * @rects: (array length=n_rects): the rectangles that make up the
+ *   input region, in the compositor overlay window's own coordinates
+ * @n_rects: the number of rectangles in @rects
+ *
+ * Sets the input shape region of the composite overlay window (the
+ * window the X11 CM backend compositor draws into, and the stage
+ * window's own parent) to the union of @rects. An empty region
+ * (@rects %NULL, @n_rects 0) makes the overlay window pass all input
+ * through to the reparented client windows beneath it.
+ */
+META_EXPORT
+void meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
+                                              XRectangle      *rects,
+                                              int              n_rects);
