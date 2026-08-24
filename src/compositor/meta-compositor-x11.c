@@ -216,13 +216,20 @@ meta_compositor_x11_manage (MetaCompositor  *compositor,
    * (other than passively-grabbed global keybindings, which bypass
    * window-stacking-based delivery entirely) never reach the stage.
    * Default to the whole screen being input-accepting instead; the JS
-   * layer still narrows this down once it successfully runs. */
+   * layer still narrows this down once it successfully runs.
+   *
+   * meta_display_get_size() here (this early in compositor manage,
+   * before monitors have necessarily finished being probed via
+   * XRandR) can return a stale placeholder value rather than the
+   * real, final screen size - confirmed live returning 1024x768 on a
+   * session that settled to 1400x1050 moments later, silently
+   * excluding input in the gap (e.g. a dash icon at y=985). An
+   * XFixes region larger than the actual overlay window is harmless,
+   * so use a fixed, generously-oversized rectangle instead of relying
+   * on a screen size query that isn't reliably final yet. */
   {
-    int display_width, display_height;
-    XRectangle rect;
+    XRectangle rect = { 0, 0, 16384, 16384 };
 
-    meta_display_get_size (display, &display_width, &display_height);
-    rect = (XRectangle) { 0, 0, display_width, display_height };
     meta_x11_display_set_stage_input_region (display->x11_display, &rect, 1);
   }
 
