@@ -62,6 +62,8 @@ enum
 
 static guint signals[N_SIGNALS];
 
+static gboolean is_wayland_compositor = FALSE;
+
 typedef enum _MetaContextState
 {
   META_CONTEXT_STATE_INIT,
@@ -293,6 +295,12 @@ meta_context_get_wayland_compositor (MetaContext *context)
   return priv->wayland_compositor;
 }
 
+gboolean
+meta_is_wayland_compositor (void)
+{
+  return is_wayland_compositor;
+}
+
 MetaServiceChannel *
 meta_context_get_service_channel (MetaContext *context)
 {
@@ -480,7 +488,10 @@ meta_context_start (MetaContext  *context,
 #ifdef HAVE_X11
   if (!META_IS_BACKEND_X11 (meta_context_get_backend (context)))
 #endif
-    priv->wayland_compositor = meta_wayland_compositor_new (context);
+    {
+      priv->wayland_compositor = meta_wayland_compositor_new (context);
+      is_wayland_compositor = TRUE;
+    }
 
   plugin_options = g_steal_pointer (&priv->plugin_options),
   priv->display = meta_display_new (context, plugin_options, error);
@@ -822,6 +833,7 @@ meta_context_dispose (GObject *object)
   g_clear_object (&priv->display);
 
   g_clear_object (&priv->wayland_compositor);
+  is_wayland_compositor = FALSE;
 
   g_clear_pointer (&priv->backend, meta_backend_destroy);
 
