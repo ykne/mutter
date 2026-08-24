@@ -1894,11 +1894,14 @@ meta_seat_x11_grab (ClutterSeat *seat,
   g_return_val_if_fail (seat_x11->grab_state == CLUTTER_GRAB_STATE_NONE,
                         seat_x11->grab_state);
 
-  if (meta_backend_grab_device (backend,
-                                META_VIRTUAL_CORE_POINTER_ID,
-                                time))
-    state |= CLUTTER_GRAB_STATE_POINTER;
-
+  /* Pointer clicks already route correctly without an explicit device
+   * grab here: the stage's input region (see _updateRegions() in
+   * gnome-shell's layout.js) determines whether X delivers a click to
+   * the stage or lets it fall through to a real window, and that stays
+   * correct across a modal grab like the overview's. X input focus has
+   * no such passthrough mechanism (it stays wherever it was regardless
+   * of Clutter's grab stack), so only the keyboard needs a real device
+   * grab here. */
   if (meta_backend_grab_device (backend,
                                 META_VIRTUAL_CORE_KEYBOARD_ID,
                                 time))
