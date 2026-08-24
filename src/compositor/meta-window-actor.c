@@ -29,6 +29,9 @@
 #include "compositor/meta-surface-actor.h"
 #include "compositor/meta-window-actor-private.h"
 #include "compositor/meta-surface-actor-wayland.h"
+#ifdef HAVE_X11
+#include "compositor/meta-surface-actor-x11.h"
+#endif
 #include "core/boxes-private.h"
 #include "core/window-private.h"
 #include "meta/window.h"
@@ -586,6 +589,23 @@ init_surface_actor (MetaWindowActor *self)
   MetaWindow *window = priv->window;
   MetaWaylandSurface *surface = meta_window_get_wayland_surface (window);
   MetaSurfaceActor *surface_actor = surface ? meta_wayland_surface_get_actor (surface) : NULL;
+
+  /* This function was only ever written for the Wayland/Xwayland case:
+   * a plain X11 window (client_type X11, no wayland surface at all -
+   * meta_window_get_wayland_surface() correctly returns NULL for one)
+   * fell straight through with surface_actor left NULL, so
+   * meta_window_actor_assign_surface_actor() was simply never called.
+   * Confirmed live: windows were managed and sized completely
+   * correctly, but nothing ever created a MetaSurfaceActorX11 for
+   * them (meta_surface_actor_x11_new() had zero callers anywhere in
+   * the codebase) - no surface actor meant no damage tracking meant
+   * no repaint ever got queued, leaving window content (and anything
+   * else needing a repaint after the very first stage expose)
+   * permanently invisible. */
+#ifdef HAVE_X11
+  if (!surface_actor && window->client_type == META_WINDOW_CLIENT_TYPE_X11)
+    surface_actor = meta_surface_actor_x11_new (window);
+#endif
 
   if (surface_actor)
     meta_window_actor_assign_surface_actor (self, surface_actor);
