@@ -224,9 +224,11 @@ void meta_x11_display_remove_alarm_filter (MetaX11Display     *x11_display,
 
 void meta_x11_display_create_guard_window (MetaX11Display *x11_display);
 
-void meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
-                                              XRectangle      *rects,
-                                              int              n_rects);
+/* meta_x11_display_set_stage_input_region() is declared, META_EXPORT-ed,
+ * in the public meta/meta-x11-display.h instead - gnome-shell's
+ * ShellGlobal needs to call it directly, and mutter builds with hidden
+ * symbol visibility by default, so a public declaration is required for
+ * that to link. */
 
 guint32 meta_x11_display_get_current_time_roundtrip (MetaX11Display *x11_display);
 
