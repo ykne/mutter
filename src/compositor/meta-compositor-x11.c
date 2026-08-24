@@ -201,7 +201,30 @@ meta_compositor_x11_manage (MetaCompositor  *compositor,
 
   XReparentWindow (xdisplay, xwindow, compositor_x11->output, 0, 0);
 
-  meta_x11_display_set_stage_input_region (display->x11_display, NULL, 0);
+  /* An empty region here (as opposed to what meta_x11_display_
+   * set_stage_input_region()'s own doc comment says) makes the overlay
+   * pass ALL input through to whatever real window is stacked below it
+   * - including input meant for the shell's own stage (a child of this
+   * same overlay window), which never gets anything until gnome-shell's
+   * JS layout manager computes and sets a real region later via
+   * global.set_stage_input_region(). That JS-side update is gated
+   * behind conditions (not starting up, no modal grab active) that
+   * can't be satisfied until the shell can already receive input - a
+   * circular dependency confirmed live: the startup overview's own
+   * modal grab holds Main.modalCount above 0 indefinitely once no
+   * other window exists to auto-dismiss it into, and clicks/keys
+   * (other than passively-grabbed global keybindings, which bypass
+   * window-stacking-based delivery entirely) never reach the stage.
+   * Default to the whole screen being input-accepting instead; the JS
+   * layer still narrows this down once it successfully runs. */
+  {
+    int display_width, display_height;
+    XRectangle rect;
+
+    meta_display_get_size (display, &display_width, &display_height);
+    rect = (XRectangle) { 0, 0, display_width, display_height };
+    meta_x11_display_set_stage_input_region (display->x11_display, &rect, 1);
+  }
 
   /*
    * Make sure there isn't any left-over output shape on the overlay window by
