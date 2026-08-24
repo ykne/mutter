@@ -35,6 +35,9 @@
 #include <xcb/res.h>
 
 #include "backends/meta-logical-monitor-private.h"
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#endif
 #include "compositor/compositor-private.h"
 #include "compositor/meta-window-actor-private.h"
 #include "core/boxes-private.h"
@@ -43,6 +46,7 @@
 #include "core/window-private.h"
 #include "core/workspace-private.h"
 #include "meta/common.h"
+#include "meta/meta-context.h"
 #include "meta/meta-cursor-tracker.h"
 #include "meta/meta-later.h"
 #include "meta/prefs.h"
@@ -3979,13 +3983,33 @@ meta_window_x11_new (MetaDisplay       *display,
       goto error;
     }
 
-    window = g_initable_new (META_TYPE_WINDOW_XWAYLAND,
-                             NULL, NULL,
-                             "display", display,
-                             "effect", effect,
-                             "attributes", &attrs,
-                             "xwindow", xwindow,
-                             NULL);
+    {
+      GType window_type = META_TYPE_WINDOW_XWAYLAND;
+
+      /* MetaWindowXwayland overrides protocol_to_stage (and friends) to
+       * query the XWayland manager for its effective scale - which does
+       * not exist under the X11 CM backend (no Xwayland compositor is
+       * ever started there), crashing on a NULL/garbage manager pointer
+       * the moment any already-mapped window got adopted here (i.e. any
+       * real client window, confirmed live: opening and then closing a
+       * browser window, then restarting the shell while it was still
+       * mapped, crashed every single restart attempt in a loop).
+       * Construct the plain base type instead, which has no such
+       * XWayland-specific coordinate scaling assumptions. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (meta_context_get_backend (
+                                 meta_display_get_context (display))))
+        window_type = META_TYPE_WINDOW_X11;
+#endif
+
+      window = g_initable_new (window_type,
+                               NULL, NULL,
+                               "display", display,
+                               "effect", effect,
+                               "attributes", &attrs,
+                               "xwindow", xwindow,
+                               NULL);
+    }
 
   if (existing_wm_state == IconicState)
     {
