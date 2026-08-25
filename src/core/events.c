@@ -63,8 +63,24 @@ static gboolean
 stage_has_grab (MetaDisplay *display)
 {
   ClutterStage *stage = stage_from_display (display);
+  ClutterActor *grab_actor = clutter_stage_get_grab_actor (stage);
 
-  return clutter_stage_get_grab_actor (stage) != NULL;
+  /* Clutter falls back to an implicit grab on the stage itself when a
+   * button press isn't claimed by any reactive actor (e.g. a plain
+   * MetaWindowActor for a composited X11 client, which isn't reactive -
+   * real input routing for those goes through X, not Clutter's actor
+   * tree) - see clutter_stage_notify_action_implicit_grab() and the
+   * grab bookkeeping in clutter_stage_grab()/_unlink_grab(). That's
+   * harmless everywhere else, but under the X11 CM backend
+   * meta_backend_x11_cm_translate_device_event() spoofs every device
+   * event's window to the stage's own xwindow so Clutter's
+   * single-window-per-stage assumption still works, which is what
+   * makes button presses hit this fallback in the first place. Treating
+   * that self-grab the same as a real modal grab (an open popup menu,
+   * the overview, etc.) made get_window_for_event() and the
+   * unmodified-click handling below bail out on every single click,
+   * so exclude it here. */
+  return grab_actor != NULL && grab_actor != CLUTTER_ACTOR (stage);
 }
 
 static MetaWindow *

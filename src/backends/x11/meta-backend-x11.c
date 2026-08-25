@@ -1297,12 +1297,22 @@ meta_backend_x11_allow_events (MetaBackendX11     *backend_x11,
 {
   MetaBackendX11Private *priv =
     meta_backend_x11_get_instance_private (backend_x11);
-  ClutterInputDevice *device;
   int xi_event_mode, device_id;
   uint32_t time_ms;
 
-  device = clutter_event_get_source_device (event);
-  device_id = meta_input_device_x11_get_device_id (device);
+  /* The passive grabs this releases (see meta_backend_x11_passive_button_grab()
+   * / meta_backend_x11_passive_grab_key()) are always established on the
+   * well-known master device IDs, not on whatever device the triggering
+   * event happens to report as its source - which, for an XTEST-injected
+   * event (any synthetic input, not just test tooling), resolves to the
+   * XTEST virtual slave device rather than the real master pointer/keyboard
+   * that's actually frozen. XIAllowEvents() must target the same device
+   * that was grabbed, or it silently does nothing: the freeze eventually
+   * clears via unrelated calls elsewhere, masking the bug as "no visible
+   * freeze" while the original event is simply never replayed. */
+  device_id = (clutter_event_type (event) == CLUTTER_KEY_PRESS ||
+              clutter_event_type (event) == CLUTTER_KEY_RELEASE) ?
+    META_VIRTUAL_CORE_KEYBOARD_ID : META_VIRTUAL_CORE_POINTER_ID;
   time_ms = clutter_event_get_time (event);
 
   switch (event_mode)
