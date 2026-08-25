@@ -59,10 +59,28 @@ meta_cursor_tracker_x11_handle_xevent (MetaCursorTrackerX11 *tracker_x11,
   if (notify_event->subtype != XFixesDisplayCursorNotify)
     return FALSE;
 
-  g_clear_object (&tracker_x11->xfixes_cursor);
-  meta_cursor_tracker_notify_cursor_changed (META_CURSOR_TRACKER (tracker_x11));
+  meta_cursor_tracker_x11_invalidate_cursor (tracker_x11);
 
   return TRUE;
+}
+
+/* Drops the cached XFixes cursor image so the next get_sprite()/poll tick
+ * re-queries XFixesGetCursorImage() instead of reusing a stale texture.
+ * Normally XFixesCursorNotify (above) is what triggers this, but at
+ * startup the very first ensure_xfixes_cursor() call can race ahead of
+ * meta_x11_display_reload_cursor()'s XDefineCursor (the latter is
+ * deferred to the compositor's first real redraw, which can lag session
+ * startup by several seconds) - if that capture lands first, it caches
+ * the X server's pre-theme default cursor forever, since no
+ * XFixesCursorNotify necessarily follows a same-shape-vs-different
+ * comparison on a window the pointer isn't demonstrably over yet. Callers
+ * that know the real cursor changed (meta_x11_display_reload_cursor())
+ * call this directly instead of hoping a notify shows up. */
+void
+meta_cursor_tracker_x11_invalidate_cursor (MetaCursorTrackerX11 *tracker_x11)
+{
+  g_clear_object (&tracker_x11->xfixes_cursor);
+  meta_cursor_tracker_notify_cursor_changed (META_CURSOR_TRACKER (tracker_x11));
 }
 
 static void
