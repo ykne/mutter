@@ -53,6 +53,7 @@
 #include "cogl/driver/gl/cogl-texture-gl-private.h"
 #include "cogl/winsys/cogl-winsys.h"
 #include "cogl/winsys/cogl-winsys-egl-x11-private.h"
+#include "mtk/mtk-x11.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -590,12 +591,39 @@ _cogl_texture_pixmap_x11_update_image_texture (CoglTexturePixmapX11 *tex_pixmap)
              if this is the first update then the entire pixmap is
              needed anyway and it saves trying to manually allocate an
              XImage at the right size */
+          mtk_x11_error_trap_push (display);
           tex_pixmap->image = XGetImage (display,
                                          tex_pixmap->pixmap,
                                          0, 0,
                                          cogl_texture_get_width (tex),
                                          cogl_texture_get_height (tex),
                                          AllPlanes, ZPixmap);
+          /* The pixmap named by the COMPOSITE extension can go stale
+           * mid-air relative to the damage rect computed above - the
+           * window it backs got resized/reconfigured between the
+           * damage event that queued this update and this call
+           * actually running (e.g. a client redrawing right after a
+           * resize, like a terminal's new-tab button spawning a new
+           * pane), so the request no longer matches the drawable's
+           * current dimensions. XGetImage() usually just returns NULL
+           * for that rather than raising an X error, but the rarer
+           * case where the server *does* report one (confirmed live:
+           * BadMatch/ShmGetImage, error_code 8, minor_code 4) reaches
+           * mtk_x_error(), which treats any untrapped error as fatal
+           * and aborts the whole compositor - confirmed via
+           * coredumpctl after a gnome-terminal new-tab click and
+           * again after "Show Menubar". Drop this update rather than
+           * crash. Resetting damage_rect (normally only done on the
+           * success path below) matters here: leaving it set would
+           * make every subsequent paint retry this exact same
+           * now-invalid rectangle against the *new* pixmap and hit
+           * the same BadMatch every frame, forever, instead of
+           * waiting for the next real damage event. */
+          if (mtk_x11_error_trap_pop_with_return (display) || !tex_pixmap->image)
+            {
+              memset (&tex_pixmap->damage_rect, 0, sizeof (MtkRectangle));
+              return;
+            }
           image = tex_pixmap->image;
           src_x = x;
           src_y = y;
@@ -621,7 +649,18 @@ _cogl_texture_pixmap_x11_update_image_texture (CoglTexturePixmapX11 *tex_pixmap)
           src_x = 0;
           src_y = 0;
 
+          /* Same stale-pixmap race as the XGetImage case above, same
+           * fatal-abort risk without a trap. XShmGetImage()'s own
+           * Status return doesn't cover this: the X error still goes
+           * to the error handler regardless of what the call returns. */
+          mtk_x11_error_trap_push (display);
           XShmGetImage (display, tex_pixmap->pixmap, image, x, y, AllPlanes);
+          if (mtk_x11_error_trap_pop_with_return (display))
+            {
+              XFree (image);
+              memset (&tex_pixmap->damage_rect, 0, sizeof (MtkRectangle));
+              return;
+            }
         }
     }
   else
@@ -632,12 +671,19 @@ _cogl_texture_pixmap_x11_update_image_texture (CoglTexturePixmapX11 *tex_pixmap)
       src_x = x;
       src_y = y;
 
+      /* Same stale-pixmap race again. */
+      mtk_x11_error_trap_push (display);
       XGetSubImage (display,
                     tex_pixmap->pixmap,
                     x, y, width, height,
                     AllPlanes, ZPixmap,
                     image,
                     x, y);
+      if (mtk_x11_error_trap_pop_with_return (display))
+        {
+          memset (&tex_pixmap->damage_rect, 0, sizeof (MtkRectangle));
+          return;
+        }
     }
 
   image_format =
