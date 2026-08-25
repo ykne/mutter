@@ -4328,6 +4328,25 @@ meta_window_x11_get_toplevel_xwindow (MetaWindow *window)
   return priv->frame ? priv->frame->xwindow : meta_window_x11_get_xwindow (window);
 }
 
+Window
+meta_window_x11_get_focus_click_grab_xwindow (MetaWindow *window)
+{
+  MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
+  MetaWindowX11Private *priv = meta_window_x11_get_instance_private (window_x11);
+
+  return priv->focus_click_grab_xwindow;
+}
+
+void
+meta_window_x11_set_focus_click_grab_xwindow (MetaWindow *window,
+                                              Window      xwindow)
+{
+  MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
+  MetaWindowX11Private *priv = meta_window_x11_get_instance_private (window_x11);
+
+  priv->focus_click_grab_xwindow = xwindow;
+}
+
 void
 meta_window_x11_freeze_commits (MetaWindow *window)
 {
