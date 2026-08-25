@@ -94,6 +94,15 @@ struct _MetaWindowX11Private
   /* window that gets updated net_wm_user_time values */
   Window user_time_window;
 
+  /* X window the click-to-focus GrabModeSync passive grab (see
+   * meta_compositor_x11_grab_focus_window_button()) is currently
+   * registered on, or None if not currently grabbed. Cached because
+   * meta_window_x11_get_toplevel_xwindow() can return a different
+   * value at grab time (before framing) than at ungrab time (after
+   * framing), which previously caused the ungrab to silently target
+   * the wrong X window and never actually release the grab. */
+  Window focus_click_grab_xwindow;
+
   /* Bypass compositor hints */
   MetaBypassCompositorHint bypass_compositor;
 

@@ -463,7 +463,7 @@ on_after_update (ClutterStage     *stage,
 
 static void
 meta_change_button_grab (MetaCompositorX11   *compositor_x11,
-                         MetaWindow          *window,
+                         Window               xwindow,
                          gboolean             grab,
                          MetaPassiveGrabMode  grab_mode,
                          int                  button,
@@ -474,9 +474,6 @@ meta_change_button_grab (MetaCompositorX11   *compositor_x11,
   MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
   MetaDisplay *display = meta_compositor_get_display (META_COMPOSITOR (compositor_x11));
   MetaKeyBindingManager *keys = &display->key_binding_manager;
-  Window xwindow;
-
-  xwindow = meta_window_x11_get_toplevel_xwindow (window);
 
   GArray *mods = calc_keygrab_modifiers (keys->ignored_modifier_mask, modmask);
 
@@ -499,7 +496,7 @@ meta_change_button_grab (MetaCompositorX11   *compositor_x11,
 
 static void
 meta_change_buttons_grab (MetaCompositorX11   *compositor_x11,
-                          MetaWindow          *window,
+                          Window               xwindow,
                           gboolean             grab,
                           MetaPassiveGrabMode  grab_mode,
                           int                  modmask)
@@ -513,12 +510,12 @@ meta_change_buttons_grab (MetaCompositorX11   *compositor_x11,
    */
   for (i = 1; i <= MAX_BUTTON; i++)
     {
-      meta_change_button_grab (compositor_x11, window, grab,
+      meta_change_button_grab (compositor_x11, xwindow, grab,
                                grab_mode, i, modmask);
     }
 
   /* Grab Alt + Shift + button1 for snap-moving window. */
-  meta_change_button_grab (compositor_x11, window,
+  meta_change_button_grab (compositor_x11, xwindow,
                            grab, grab_mode,
                            1, modmask | CLUTTER_SHIFT_MASK);
 
@@ -539,7 +536,9 @@ meta_compositor_x11_grab_window_buttons (MetaCompositorX11 *compositor_x11,
 
   if (modmask != 0)
     {
-      meta_change_buttons_grab (compositor_x11, window, TRUE,
+      Window xwindow = meta_window_x11_get_toplevel_xwindow (window);
+
+      meta_change_buttons_grab (compositor_x11, xwindow, TRUE,
                                 META_GRAB_MODE_ASYNC, modmask);
     }
 }
@@ -558,7 +557,9 @@ meta_compositor_x11_ungrab_window_buttons (MetaCompositorX11 *compositor_x11,
 
   if (modmask != 0)
     {
-      meta_change_buttons_grab (compositor_x11, window, FALSE,
+      Window xwindow = meta_window_x11_get_toplevel_xwindow (window);
+
+      meta_change_buttons_grab (compositor_x11, xwindow, FALSE,
                                 META_GRAB_MODE_ASYNC, modmask);
     }
 }
@@ -567,11 +568,22 @@ static void
 meta_compositor_x11_grab_focus_window_button (MetaCompositorX11 *compositor_x11,
                                               MetaWindow        *window)
 {
+  Window xwindow;
+
   /* Grab button 1 for activating unfocused windows */
   meta_topic (META_DEBUG_X11, "Grabbing unfocused window buttons for %s",
               window->desc);
 
-  meta_change_buttons_grab (compositor_x11, window, TRUE,
+  /* Cache the xwindow actually used for this grab - meta_window_x11_
+   * get_toplevel_xwindow() can return a different X window once the
+   * window gets framed later, and the matching ungrab (in
+   * meta_compositor_x11_ungrab_focus_window_button(), possibly called
+   * much later) needs to target this exact same window or it silently
+   * removes nothing. */
+  xwindow = meta_window_x11_get_toplevel_xwindow (window);
+  meta_window_x11_set_focus_click_grab_xwindow (window, xwindow);
+
+  meta_change_buttons_grab (compositor_x11, xwindow, TRUE,
                             META_GRAB_MODE_SYNC, 0);
 }
 
@@ -579,11 +591,22 @@ static void
 meta_compositor_x11_ungrab_focus_window_button (MetaCompositorX11 *compositor_x11,
                                                 MetaWindow        *window)
 {
+  Window xwindow;
+
   meta_topic (META_DEBUG_X11, "Ungrabbing unfocused window buttons for %s",
               window->desc);
 
-  meta_change_buttons_grab (compositor_x11, window, FALSE,
+  /* Use the xwindow actually grabbed, not whatever
+   * meta_window_x11_get_toplevel_xwindow() returns now - it may have
+   * changed (e.g. due to framing) since the grab was established. */
+  xwindow = meta_window_x11_get_focus_click_grab_xwindow (window);
+  if (xwindow == None)
+    return;
+
+  meta_change_buttons_grab (compositor_x11, xwindow, FALSE,
                             META_GRAB_MODE_ASYNC, 0);
+
+  meta_window_x11_set_focus_click_grab_xwindow (window, None);
 }
 
 static GArray *
