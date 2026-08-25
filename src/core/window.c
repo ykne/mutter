@@ -87,6 +87,10 @@
 #include "wayland/meta-wayland-surface-private.h"
 #include "wayland/meta-window-wayland.h"
 
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#endif
+
 #ifdef HAVE_XWAYLAND
 #include "mtk/mtk-x11.h"
 #include "x11/meta-x11-display-private.h"
@@ -7804,6 +7808,26 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
       else
         meta_topic (META_DEBUG_FOCUS,
                     "Not raising window on click due to don't-raise-on-click option");
+
+      /* The passive click-to-focus grab (XIGrabButton, SYNC mode - see
+       * meta_compositor_x11_grab_focus_window_button()) freezes the
+       * device until something explicitly releases it. The vfunc that
+       * used to do this (MetaCompositorClass::handle_event, calling
+       * meta_backend_x11_allow_events()) was removed as presumed dead
+       * code when event dispatch was unified into
+       * meta_display_handle_event() - but nothing replaced it, leaving
+       * meta_backend_x11_allow_events() with zero callers and every
+       * grabbed click permanently undelivered to the real client
+       * window once mutter's own focus/raise handling above is done
+       * with it. Replay it now so the client actually receives the
+       * click, not just mutter's own passive grab. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_REPLAY);
+        }
+#endif
     }
   else if (is_window_grab && (int) button == meta_prefs_get_mouse_button_resize ())
     {
