@@ -7734,15 +7734,38 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
   gfloat x, y;
   guint button;
 
-  if (window->unmanaging)
-    return CLUTTER_EVENT_PROPAGATE;
-
   event_type = clutter_event_type (event);
   time_ms = clutter_event_get_time (event);
 
   if (event_type != CLUTTER_BUTTON_PRESS &&
       event_type != CLUTTER_TOUCH_BEGIN)
     return CLUTTER_EVENT_PROPAGATE;
+
+  if (window->unmanaging)
+    {
+      /* The passive click-to-focus grab (XIGrabButton, SYNC mode - see
+       * meta_compositor_x11_grab_focus_window_button()) that routed this
+       * button-press event here freezes the input device until something
+       * calls XIAllowEvents() - normally done below, after focus/raise
+       * handling. But if this same physical click *also* closed the
+       * window (e.g. clicking the overview's close button, whose
+       * on-screen position overlaps the underlying client window's own
+       * passive-grab region), window->unmanaging can already be true by
+       * the time we get here, and this used to bail out immediately
+       * without ever releasing the grab - freezing the pointer (and, for
+       * a combined grab, the keyboard too) for the rest of the session,
+       * recoverable only by restarting. Thaw the device before giving up
+       * so a window closing mid-click can't leave input permanently
+       * stuck. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
+      return CLUTTER_EVENT_PROPAGATE;
+    }
 
   if (event_type == CLUTTER_TOUCH_BEGIN)
     button = CLUTTER_BUTTON_PRIMARY;
