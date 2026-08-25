@@ -53,6 +53,7 @@
 #include "backends/meta-settings-private.h"
 #ifdef HAVE_X11
 #include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-cursor-tracker-x11.h"
 #endif
 #include "core/meta-workspace-manager-private.h"
 #include "core/util-private.h"
@@ -1676,6 +1677,29 @@ meta_x11_display_reload_cursor (MetaX11Display *x11_display)
   XDefineCursor (x11_display->xdisplay, x11_display->xroot, xcursor);
   XFlush (x11_display->xdisplay);
 
+  /* The core X cursor set above is what mutter's own compositor-side
+   * cursor sprite (under X11 CM) is ultimately derived from, via
+   * XFixesGetCursorImage() in MetaCursorTrackerX11 - but that tracker
+   * may have already cached a (now-stale) sprite captured before this
+   * XDefineCursor ever ran (see meta_cursor_tracker_x11_invalidate_cursor()'s
+   * comment). Explicitly invalidate it here, at the exact point the real
+   * cursor is known to have changed, rather than relying on an
+   * XFixesCursorNotify that may not arrive in time (or at all) during
+   * early startup. */
+#ifdef HAVE_X11
+  {
+    MetaBackend *backend = backend_from_x11_display (x11_display);
+
+    if (META_IS_BACKEND_X11 (backend))
+      {
+        MetaCursorTracker *cursor_tracker =
+          meta_backend_get_cursor_tracker (backend);
+
+        meta_cursor_tracker_x11_invalidate_cursor (META_CURSOR_TRACKER_X11 (cursor_tracker));
+      }
+  }
+#endif
+
   if (xcursor)
     XFreeCursor (x11_display->xdisplay, xcursor);
 }
@@ -1790,6 +1814,28 @@ update_cursor_theme (MetaX11Display *x11_display)
 
   set_cursor_theme (x11_display->xdisplay, theme, size);
   schedule_reload_x11_cursor (x11_display);
+
+  /* schedule_reload_x11_cursor() above only sets the *core* X11 cursor
+   * on the root window (the fallback for clients that don't set their
+   * own) - it says nothing to mutter's own compositor-side cursor
+   * renderer (the Clutter-composited sprite that's actually what's
+   * visible on screen under X11 CM). Without this, the composited
+   * cursor sprite stays whatever it happened to be initialized to
+   * (observed live as the plain X "X" glyph) until something else
+   * happens to force a refresh - confirmed live: a fresh login shows
+   * the wrong cursor indefinitely, but restarting the compositor
+   * (which re-initializes the cursor renderer from scratch) fixes it
+   * immediately. */
+#ifdef HAVE_X11
+  if (META_IS_BACKEND_X11 (backend))
+    {
+      MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
+
+      set_cursor_theme (meta_backend_x11_get_xdisplay (backend_x11),
+                        theme, size);
+      meta_backend_x11_reload_cursor (backend_x11);
+    }
+#endif
 }
 
 MetaWindow *

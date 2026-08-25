@@ -29,3 +29,5 @@ G_DECLARE_FINAL_TYPE (MetaCursorTrackerX11, meta_cursor_tracker_x11,
 
 gboolean meta_cursor_tracker_x11_handle_xevent (MetaCursorTrackerX11 *tracker_x11,
                                                 XEvent               *xevent);
+
+void meta_cursor_tracker_x11_invalidate_cursor (MetaCursorTrackerX11 *tracker_x11);
