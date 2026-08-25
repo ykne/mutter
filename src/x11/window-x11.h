@@ -84,6 +84,10 @@ void     meta_window_x11_configure_notify        (MetaWindow      *window,
 META_EXPORT_TEST
 Window   meta_window_x11_get_toplevel_xwindow    (MetaWindow *window);
 
+Window   meta_window_x11_get_focus_click_grab_xwindow (MetaWindow *window);
+void     meta_window_x11_set_focus_click_grab_xwindow (MetaWindow *window,
+                                                        Window      xwindow);
+
 void     meta_window_x11_freeze_commits          (MetaWindow *window);
 void     meta_window_x11_thaw_commits            (MetaWindow *window);
 
