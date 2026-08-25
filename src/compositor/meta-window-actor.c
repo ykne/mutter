@@ -1049,6 +1049,28 @@ meta_window_actor_sync_actor_geometry (MetaWindowActor *self,
 
   meta_window_get_buffer_rect (priv->window, &actor_rect);
 
+  /* When running as a Wayland compositor we catch size changes when new
+   * buffers are attached - under X11, nothing else tells the surface
+   * actor's underlying CoglTexturePixmapX11 that the window's pixmap
+   * needs re-fetching after a resize (see meta_surface_actor_x11_set_size(),
+   * which sets self->size_changed, the only thing that makes
+   * update_pixmap() in meta-surface-actor-x11.c detach and refetch a
+   * fresh, correctly-sized pixmap). Without this call, a resized
+   * window's next damage-triggered texture update reads against a
+   * stale, wrong-sized pixmap - confirmed live as a BadMatch on
+   * XShmGetImage (mtk_x_error() error_code 8, minor_code 4) that used
+   * to abort the whole compositor, and which then silently leaves the
+   * screen showing frozen, stale content forever even once that abort
+   * is trapped, despite the window itself continuing to work correctly
+   * underneath (confirmed by comparing a direct window-content capture,
+   * which showed live, correctly up-to-date content, against the
+   * composited screen, which didn't). */
+#ifdef HAVE_X11
+  if (META_IS_SURFACE_ACTOR_X11 (priv->surface))
+    meta_surface_actor_x11_set_size (META_SURFACE_ACTOR_X11 (priv->surface),
+                                     actor_rect.width, actor_rect.height);
+#endif
+
   /* Normally we want freezing a window to also freeze its position; this allows
    * windows to atomically move and resize together, either under app control,
    * or because the user is resizing from the left/top. But on initial placement
