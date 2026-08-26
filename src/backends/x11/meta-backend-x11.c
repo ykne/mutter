@@ -1340,5 +1340,9 @@ meta_backend_x11_allow_events (MetaBackendX11     *backend_x11,
       return;
     }
 
+  g_message ("INSTR allow_events called mode=%d device_id=%d time=%u t=%"
+             G_GINT64_FORMAT, event_mode, device_id, time_ms,
+             g_get_monotonic_time ());
+
   XIAllowEvents (priv->xdisplay, device_id, xi_event_mode, time_ms);
 }

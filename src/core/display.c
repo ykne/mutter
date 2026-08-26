@@ -1463,9 +1463,21 @@ meta_display_set_input_focus (MetaDisplay *display,
                               guint32      timestamp)
 {
   MetaDisplayPrivate *priv = meta_display_get_instance_private (display);
+  guint32 orig_timestamp = timestamp;
 
   if (meta_display_timestamp_too_old (display, &timestamp))
-    return;
+    {
+      g_message ("INSTR set_input_focus REJECTED window=%s ts=%u last_focus_time=%u last_user_time=%u t=%" G_GINT64_FORMAT,
+                 window ? window->desc : "(null)", orig_timestamp,
+                 display->last_focus_time, display->last_user_time,
+                 g_get_monotonic_time ());
+      return;
+    }
+
+  g_message ("INSTR set_input_focus ACCEPTED window=%s ts=%u(->%u) last_focus_time=%u last_user_time=%u t=%" G_GINT64_FORMAT,
+             window ? window->desc : "(null)", orig_timestamp, timestamp,
+             display->last_focus_time, display->last_user_time,
+             g_get_monotonic_time ());
 
   g_clear_handle_id (&priv->mouse_focus.idle_handle_id, g_source_remove);
 

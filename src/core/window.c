@@ -7741,6 +7741,9 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
       event_type != CLUTTER_TOUCH_BEGIN)
     return CLUTTER_EVENT_PROPAGATE;
 
+  g_message ("INSTR ungrabbed_event enter window=%p t=%" G_GINT64_FORMAT,
+             window, g_get_monotonic_time ());
+
   if (window->unmanaging)
     {
       /* The passive click-to-focus grab (XIGrabButton, SYNC mode - see
@@ -7847,8 +7850,12 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
 #ifdef HAVE_X11
       if (META_IS_BACKEND_X11 (backend))
         {
+          g_message ("INSTR pre-allow_events t=%" G_GINT64_FORMAT,
+                     g_get_monotonic_time ());
           meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
                                          META_EVENT_MODE_REPLAY);
+          g_message ("INSTR post-allow_events t=%" G_GINT64_FORMAT,
+                     g_get_monotonic_time ());
         }
 #endif
     }
@@ -7914,6 +7921,8 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
         }
     }
 
+  g_message ("INSTR ungrabbed_event exit t=%" G_GINT64_FORMAT,
+             g_get_monotonic_time ());
   return CLUTTER_EVENT_PROPAGATE;
 }
 
