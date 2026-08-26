@@ -170,8 +170,22 @@ meta_display_handle_event (MetaDisplay        *display,
 
   event_type = clutter_event_type (event);
 
+  if (event_type == CLUTTER_BUTTON_PRESS)
+    {
+      g_message ("INSTR handle_event enter type=BUTTON_PRESS has_grab=%d t=%"
+                 G_GINT64_FORMAT, has_grab, g_get_monotonic_time ());
+    }
+
   if (meta_display_process_captured_input (display, event))
-    return CLUTTER_EVENT_STOP;
+    {
+      if (event_type == CLUTTER_BUTTON_PRESS)
+        {
+          g_message ("INSTR handle_event captured_input consumed it, "
+                     "returning early t=%" G_GINT64_FORMAT,
+                     g_get_monotonic_time ());
+        }
+      return CLUTTER_EVENT_STOP;
+    }
 
   if (IS_KEY_EVENT (event_type))
     {
@@ -255,6 +269,13 @@ meta_display_handle_event (MetaDisplay        *display,
 
   window = get_window_for_event (display, event, event_actor);
 
+  if (event_type == CLUTTER_BUTTON_PRESS)
+    {
+      g_message ("INSTR handle_event get_window_for_event window=%p "
+                 "stage_has_grab=%d t=%" G_GINT64_FORMAT,
+                 window, stage_has_grab (display), g_get_monotonic_time ());
+    }
+
   if (window && !window->override_redirect &&
       (event_type == CLUTTER_KEY_PRESS ||
        event_type == CLUTTER_BUTTON_PRESS ||
@@ -310,7 +331,21 @@ meta_display_handle_event (MetaDisplay        *display,
     return CLUTTER_EVENT_PROPAGATE;
 
   if (stage_has_grab (display))
-    return CLUTTER_EVENT_PROPAGATE;
+    {
+      if (event_type == CLUTTER_BUTTON_PRESS)
+        {
+          g_message ("INSTR handle_event second stage_has_grab check TRUE, "
+                     "bailing before ungrabbed_event t=%" G_GINT64_FORMAT,
+                     g_get_monotonic_time ());
+        }
+      return CLUTTER_EVENT_PROPAGATE;
+    }
+
+  if (event_type == CLUTTER_BUTTON_PRESS)
+    {
+      g_message ("INSTR handle_event about to check window (window=%p) t=%"
+                 G_GINT64_FORMAT, window, g_get_monotonic_time ());
+    }
 
   if (window)
     {
