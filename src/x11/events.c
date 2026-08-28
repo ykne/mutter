@@ -31,6 +31,7 @@
 #include <X11/extensions/shape.h>
 
 #include "backends/meta-cursor-tracker-private.h"
+#include "backends/x11/meta-cursor-tracker-x11.h"
 #include "cogl/cogl.h"
 #include "compositor/meta-compositor-x11.h"
 #include "core/bell.h"
@@ -1300,6 +1301,31 @@ handle_other_xevent (MetaX11Display *x11_display,
             }
         }
 
+      return;
+    }
+
+  if (event->type == (x11_display->xfixes_event_base + XFixesCursorNotify))
+    {
+      /* meta_x11_display_init() (meta-x11-display.c) selects for these
+       * via XFixesSelectCursorInput() so MetaCursorTrackerX11 stays up
+       * to date (see its own doc comment), but nothing ever actually
+       * routed the arriving events to it - meta_cursor_tracker_x11_
+       * handle_xevent() existed, fully implemented, with no caller
+       * anywhere in the tree. Without this, MetaCursorTrackerX11's
+       * cached MetaCursorSpriteXfixes is captured once (whatever the
+       * cursor happened to be at session startup, or the next 100ms
+       * poll tick to race ahead of it) and never invalidated again, so
+       * every later real per-window hover cursor change (resize edges,
+       * text-entry I-beam, etc.) never reaches the renderer at all -
+       * this is the root cause of project_edge_resize_broken.md's
+       * long-standing "cursor never visually changes shape" bug. */
+      MetaBackend *backend =
+        meta_context_get_backend (meta_display_get_context (display));
+      MetaCursorTracker *cursor_tracker =
+        meta_backend_get_cursor_tracker (backend);
+
+      meta_cursor_tracker_x11_handle_xevent (META_CURSOR_TRACKER_X11 (cursor_tracker),
+                                             event);
       return;
     }
 

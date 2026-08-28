@@ -134,6 +134,18 @@ update_cursor_timeout (gpointer user_data)
   else
     cursor_sprite = NULL;
 
+  /* meta_cursor_renderer_update_stage_overlay() alone only drives the
+   * generic ClutterCursor-based stage overlay - it never reaches
+   * MetaCursorRendererX11's own update_cursor() vfunc, which is the
+   * ONLY place XDefineCursor() gets called from. Without this, the
+   * X server's own/native cursor (and, on this class of VM, whatever
+   * the display's own out-of-band cursor mirror shows - see
+   * project_edge_resize_broken.md) never learns about a real per-widget
+   * hover cursor change at all, no matter how correctly this tracker's
+   * own XFixes-derived sprite is kept up to date. Route it through the
+   * full vfunc chain instead so both paths - native XDefineCursor() and
+   * this backend's own SW overlay - see the same fresh sprite. */
+  meta_cursor_renderer_set_cursor (cursor_renderer, cursor_sprite);
   meta_cursor_renderer_update_stage_overlay (cursor_renderer, cursor_sprite);
 
   if (cursor_changed)
