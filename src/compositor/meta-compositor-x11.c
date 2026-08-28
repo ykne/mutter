@@ -201,37 +201,7 @@ meta_compositor_x11_manage (MetaCompositor  *compositor,
 
   XReparentWindow (xdisplay, xwindow, compositor_x11->output, 0, 0);
 
-  /* An empty region here (as opposed to what meta_x11_display_
-   * set_stage_input_region()'s own doc comment says) makes the overlay
-   * pass ALL input through to whatever real window is stacked below it
-   * - including input meant for the shell's own stage (a child of this
-   * same overlay window), which never gets anything until gnome-shell's
-   * JS layout manager computes and sets a real region later via
-   * global.set_stage_input_region(). That JS-side update is gated
-   * behind conditions (not starting up, no modal grab active) that
-   * can't be satisfied until the shell can already receive input - a
-   * circular dependency confirmed live: the startup overview's own
-   * modal grab holds Main.modalCount above 0 indefinitely once no
-   * other window exists to auto-dismiss it into, and clicks/keys
-   * (other than passively-grabbed global keybindings, which bypass
-   * window-stacking-based delivery entirely) never reach the stage.
-   * Default to the whole screen being input-accepting instead; the JS
-   * layer still narrows this down once it successfully runs.
-   *
-   * meta_display_get_size() here (this early in compositor manage,
-   * before monitors have necessarily finished being probed via
-   * XRandR) can return a stale placeholder value rather than the
-   * real, final screen size - confirmed live returning 1024x768 on a
-   * session that settled to 1400x1050 moments later, silently
-   * excluding input in the gap (e.g. a dash icon at y=985). An
-   * XFixes region larger than the actual overlay window is harmless,
-   * so use a fixed, generously-oversized rectangle instead of relying
-   * on a screen size query that isn't reliably final yet. */
-  {
-    XRectangle rect = { 0, 0, 16384, 16384 };
-
-    meta_x11_display_set_stage_input_region (display->x11_display, &rect, 1);
-  }
+  meta_x11_display_set_stage_input_region (display->x11_display, NULL, 0);
 
   /*
    * Make sure there isn't any left-over output shape on the overlay window by
