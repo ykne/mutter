@@ -1957,6 +1957,26 @@ create_guard_window (MetaX11Display *x11_display)
   /* https://bugzilla.gnome.org/show_bug.cgi?id=710346 */
   XStoreName (x11_display->xdisplay, guard_window, "mutter guard window");
 
+  if (!meta_is_wayland_compositor ())
+    {
+      MetaBackendX11 *backend =
+        META_BACKEND_X11 (backend_from_x11_display (x11_display));
+      Display *backend_xdisplay = meta_backend_x11_get_xdisplay (backend);
+      unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+      XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
+
+      XISetMask (mask.mask, XI_ButtonPress);
+      XISetMask (mask.mask, XI_ButtonRelease);
+      XISetMask (mask.mask, XI_Motion);
+
+      /* Sync on the connection we created the window on to
+       * make sure it's created before we select on it on the
+       * backend connection. */
+      XSync (x11_display->xdisplay, False);
+
+      XISelectEvents (backend_xdisplay, guard_window, &mask, 1);
+    }
+
   meta_stack_tracker_record_add (x11_display->display->stack_tracker,
                                  guard_window,
                                  create_serial);
@@ -1988,19 +2008,43 @@ meta_x11_display_create_guard_window (MetaX11Display *x11_display)
     x11_display->guard_window = create_guard_window (x11_display);
 }
 
-/* Sets the input shape region of the composite overlay window (the window
- * the compositor draws into, sitting above all client windows) to the
- * given rectangles - an empty region (rects == NULL, n_rects == 0) makes
- * the overlay window pass all input through to the reparented client
- * windows beneath it, which is what the X11 compositor wants. */
+/* Sets the input shape region of both the stage window (a child of the
+ * composite overlay window, reparented into it by meta_compositor_x11_
+ * manage()) and the composite overlay window itself (the window the
+ * compositor draws into, sitting above all client windows) to the given
+ * rectangles - an empty region (rects == NULL, n_rects == 0) makes both
+ * windows pass all input through to whatever real client window is
+ * stacked beneath them.
+ *
+ * Setting this only on the overlay window is not enough: the stage
+ * window is a CHILD of the overlay, occupying the same area, and an
+ * input shape is only a passthrough for a given window if that window
+ * itself has no claim there - the stage's own input shape, left at its
+ * default (unrestricted - claims its entire bounding rect) if never set
+ * explicitly, would keep swallowing all input regardless of what the
+ * overlay's own shape says, since input reaching the overlay's claimed
+ * area is next tested against the overlay's own child (the stage)
+ * before falling through further. Confirmed live: setting this only on
+ * the overlay left real client windows completely unable to receive
+ * any input (clicks, drags) even with an empty/passthrough overlay
+ * shape. */
 void
 meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
                                          XRectangle      *rects,
                                          int              n_rects)
 {
+  MetaBackend *backend = backend_from_x11_display (x11_display);
+  Window stage_xwindow = meta_backend_x11_get_xwindow (META_BACKEND_X11 (backend));
   XserverRegion region;
 
+  g_message ("INSTR set_stage_input_region n_rects=%d stage_xwindow=0x%lx "
+            "overlay=0x%lx", n_rects, (unsigned long) stage_xwindow,
+            (unsigned long) x11_display->composite_overlay_window);
+
   region = XFixesCreateRegion (x11_display->xdisplay, rects, n_rects);
+  XFixesSetWindowShapeRegion (x11_display->xdisplay,
+                              stage_xwindow,
+                              ShapeInput, 0, 0, region);
   XFixesSetWindowShapeRegion (x11_display->xdisplay,
                               x11_display->composite_overlay_window,
                               ShapeInput, 0, 0, region);

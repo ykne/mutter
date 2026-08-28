@@ -300,6 +300,18 @@ handle_input_event (MetaBackendX11 *x11,
           meta_x11_barriers_process_xevent (barriers, input_event))
         return TRUE;
 
+      if (input_event->evtype == XI_ButtonPress)
+        {
+          XIDeviceEvent *dev_event = (XIDeviceEvent *) input_event;
+          g_message ("INSTR raw XI_ButtonPress event=0x%lx root=0x%lx "
+                     "child=0x%lx x=%f y=%f root_x=%f root_y=%f",
+                     (unsigned long) dev_event->event,
+                     (unsigned long) dev_event->root,
+                     (unsigned long) dev_event->child,
+                     dev_event->event_x, dev_event->event_y,
+                     dev_event->root_x, dev_event->root_y);
+        }
+
       maybe_spoof_event_as_stage_event (x11, input_event);
     }
 

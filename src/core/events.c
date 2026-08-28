@@ -101,6 +101,19 @@ get_window_for_event (MetaDisplay        *display,
     }
 
   window_actor = meta_window_actor_from_actor (event_actor);
+
+  if (clutter_event_type (event) == CLUTTER_BUTTON_PRESS)
+    {
+      float ex = 0, ey = 0;
+      clutter_event_get_coords (event, &ex, &ey);
+      g_message ("INSTR get_window_for_event event_actor=%p (%s) name=%s "
+                 "window_actor=%p coords=%f,%f",
+                 event_actor,
+                 event_actor ? G_OBJECT_TYPE_NAME (event_actor) : "null",
+                 event_actor ? clutter_actor_get_name (event_actor) : "null",
+                 window_actor, ex, ey);
+    }
+
   if (window_actor)
     return meta_window_actor_get_meta_window (window_actor);
   else
