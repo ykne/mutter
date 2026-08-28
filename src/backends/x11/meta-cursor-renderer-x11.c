@@ -47,7 +47,6 @@ struct _MetaCursorRendererX11
 
   gboolean server_cursor_visible;
   gboolean force_sw_cursor;
-  gboolean root_cursor_blanked;
   MetaOverlay *sw_cursor_overlay;
   guint force_sw_cursor_poll_id;
 };
@@ -529,31 +528,15 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
        * X server's cursor to the actual viewer out-of-band (invisible
        * to any in-guest screenshot/query - see
        * project_edge_resize_broken.md) does not reliably reflect real
-       * per-window hover cursor changes, and an earlier attempt to
-       * suppress it via XFixesHideCursor() (a visibility TOGGLE) had no
-       * effect - it appears to just keep showing whatever cursor IMAGE
-       * is currently defined, regardless of show/hide state. Define an
-       * actual blank cursor image on the root window instead (once),
-       * so there is nothing for that mechanism to mirror at all -
-       * this backend's own SW overlay above is now the sole visible
-       * cursor for every case, matching kwin_x11's single-cursor
-       * behavior via the opposite means (kwin lets native rendering
-       * show through; this makes native rendering show nothing, since
-       * it doesn't reliably reflect real cursor state here anyway). */
-      if (!x11->root_cursor_blanked)
-        {
-          Cursor blank_cursor = create_blank_cursor (xdisplay);
-
-          if (blank_cursor)
-            {
-              XDefineCursor (xdisplay, DefaultRootWindow (xdisplay),
-                             blank_cursor);
-              XFlush (xdisplay);
-              XFreeCursor (xdisplay, blank_cursor);
-            }
-          x11->root_cursor_blanked = TRUE;
-        }
-
+       * per-window hover cursor changes, and four independent attempts
+       * to suppress it (XFixesHideCursor() on root, a blank cursor
+       * image on root, XFixesHideCursor() on this window, a blank
+       * cursor image on this window) all failed the same way: it just
+       * keeps showing the last non-blank shape rather than actually
+       * disappearing. This appears to be a hard limitation of that
+       * out-of-band renderer itself, not something reachable from here -
+       * this backend's own SW overlay above is the intended correct
+       * cursor; the out-of-band one stays visible regardless. */
       update_sw_cursor_overlay (x11, backend, xdisplay);
 
       return FALSE;
