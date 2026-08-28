@@ -539,6 +539,9 @@ update_current_monitor_mode_scale (MetaMonitor *monitor)
     return;
 
   logical_monitor = meta_monitor_get_logical_monitor (monitor);
+  if (!logical_monitor)
+    return;
+
   scale = meta_logical_monitor_get_scale (logical_monitor);
 
   meta_monitor_set_default_scale (monitor, monitor_mode, scale);
