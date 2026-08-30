@@ -325,10 +325,14 @@ cogl_winsys_egl_x11_display_destroy (CoglWinsys  *winsys,
 {
   CoglDisplayEGL *egl_display = display->winsys;
 
-  g_clear_pointer (&egl_display->platform, g_free);
-
+  /* The parent's display_destroy() calls cleanup_context(), which
+   * dispatches back into this file's cogl_winsys_egl_x11_cleanup_context()
+   * - that function dereferences egl_display->platform, so it must run
+   * before we free it here, not after. */
   COGL_WINSYS_CLASS (cogl_winsys_egl_x11_parent_class)->display_destroy (winsys,
                                                                          display);
+
+  g_clear_pointer (&egl_display->platform, g_free);
 }
 
 static gboolean
