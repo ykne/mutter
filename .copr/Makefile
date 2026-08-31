@@ -14,12 +14,13 @@ srpm:
 	set -e; \
 	dnf install -y git-core; \
 	hash=$$(git rev-parse --short=8 HEAD); \
+	ts=$$(git log -1 --format=%ct HEAD); \
 	workdir=$$(mktemp -d); \
 	mkdir -p "$$workdir/$(PKG)-$(VERSION)" "$$workdir/SOURCES"; \
 	git archive HEAD | tar -x -C "$$workdir/$(PKG)-$(VERSION)"; \
 	tar -cJf "$$workdir/SOURCES/$(PKG)-$(VERSION).tar.xz" -C "$$workdir" "$(PKG)-$(VERSION)"; \
 	cp .copr/SOURCES/* "$$workdir/SOURCES/" 2>/dev/null || true; \
-	sed "s/^Release:.*\$$/Release:        1.g$${hash}%{?dist}/" "$(spec)" > "$$workdir/$(PKG).spec"; \
+	sed "s/^Release:.*\$$/Release:        $${ts}.g$${hash}%{?dist}/" "$(spec)" > "$$workdir/$(PKG).spec"; \
 	rpmbuild -bs \
 		--define "_topdir $$workdir" \
 		--define "_sourcedir $$workdir/SOURCES" \
