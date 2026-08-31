@@ -39,6 +39,10 @@
 #include "backends/native/meta-backend-native.h"
 #endif
 
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#endif
+
 #define IS_KEY_EVENT(et) ((et) == CLUTTER_KEY_PRESS || \
                           (et) == CLUTTER_KEY_RELEASE)
 
@@ -317,9 +321,36 @@ meta_display_handle_event (MetaDisplay        *display,
    * in a keyboard-grabbed mode like moving a window, we don't
    * want to pass the key event to the compositor or Wayland at all.
    */
-  if (!meta_compositor_get_current_window_drag (compositor) &&
-      meta_keybindings_process_event (display, window, event))
-    return CLUTTER_EVENT_STOP;
+  if (!meta_compositor_get_current_window_drag (compositor))
+    {
+      gboolean keybinding_handled =
+        meta_keybindings_process_event (display, window, event);
+
+      /* Every keycode bound to a global keybinding (see
+       * meta_compositor_x11_change_keygrab()) is passively grabbed with
+       * XIGrabModeSync, which freezes the virtual keyboard device the
+       * instant a matching key is pressed - X won't deliver any further
+       * key events for that device, bound or not, until something calls
+       * XIAllowEvents(). Nothing ever did on this path, so the very
+       * first global shortcut in a session (the bare overlay key, Print,
+       * Super+Left tiling, ...) froze the keyboard for good. Thaw it
+       * here - REPLAY sends the event on to the client when we didn't
+       * handle it (mirrors the analogous fix for the passive button
+       * grab in meta_window_handle_ungrabbed_event()), THAW just
+       * unfreezes when we did. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend) && IS_KEY_EVENT (event_type))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         keybinding_handled ?
+                                         META_EVENT_MODE_THAW :
+                                         META_EVENT_MODE_REPLAY);
+        }
+#endif
+
+      if (keybinding_handled)
+        return CLUTTER_EVENT_STOP;
+    }
 
   /* Do not pass keyboard events to Wayland if key focus is not on the
    * stage in normal mode (e.g. during keynav in the panel)
