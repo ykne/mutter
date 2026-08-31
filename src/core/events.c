@@ -341,10 +341,57 @@ meta_display_handle_event (MetaDisplay        *display,
 #ifdef HAVE_X11
       if (META_IS_BACKEND_X11 (backend) && IS_KEY_EVENT (event_type))
         {
+          MetaEventMode event_mode;
+
+          event_mode = keybinding_handled ?
+            META_EVENT_MODE_THAW : META_EVENT_MODE_REPLAY;
+
+          /* A PROPAGATE here for a KEY_PRESS matching the overlay-key or
+           * locate-pointer-key's own keycode isn't "not ours, let the
+           * client see it" - it's process_special_modifier_key() (see
+           * keybindings.c) tentatively arming its "waiting for a lone
+           * release" flag, deliberately deferring the real decision
+           * until that release arrives (or a different key's press
+           * proves this wasn't a lone tap - see that function's own
+           * comment). REPLAY-ing this press anyway - which only matters
+           * when nothing is focused, since a focused client's own
+           * per-window grab otherwise gives the sequence a second
+           * chance - loses the device's claim on the matching
+           * KEY_RELEASE that's still to come: it never reaches this
+           * handler at all, so the tap is silently swallowed and the
+           * flag is left stuck armed. Confirmed live: with no window
+           * focused, a bare Super tap consistently did nothing at all;
+           * a second tap then worked, because process_special_modifier_key()
+           * took its "repeat press, already armed" branch instead - a
+           * STOP, which THAWs correctly. THAW here instead: we're
+           * keeping this event as our own regardless of how the
+           * sequence resolves, so there's nothing to replay to anyone. */
+          if (event_mode == META_EVENT_MODE_REPLAY &&
+              event_type == CLUTTER_KEY_PRESS)
+            {
+              MetaKeyBindingManager *keys = &display->key_binding_manager;
+              uint32_t keycode = clutter_event_get_key_code (event);
+              MetaResolvedKeyCombo *combos[] = {
+                &keys->overlay_resolved_key_combo,
+                &keys->locate_pointer_resolved_key_combo,
+              };
+              int i, j;
+
+              for (i = 0; i < (int) G_N_ELEMENTS (combos); i++)
+                {
+                  for (j = 0; j < combos[i]->len; j++)
+                    {
+                      if (combos[i]->keycodes[j] == keycode)
+                        {
+                          event_mode = META_EVENT_MODE_THAW;
+                          break;
+                        }
+                    }
+                }
+            }
+
           meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
-                                         keybinding_handled ?
-                                         META_EVENT_MODE_THAW :
-                                         META_EVENT_MODE_REPLAY);
+                                         event_mode);
         }
 #endif
 
