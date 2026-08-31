@@ -12,6 +12,7 @@ VERSION := 50.4
 .PHONY: srpm
 srpm:
 	set -e; \
+	dnf install -y git-core; \
 	hash=$$(git rev-parse --short=8 HEAD); \
 	workdir=$$(mktemp -d); \
 	mkdir -p "$$workdir/$(PKG)-$(VERSION)" "$$workdir/SOURCES"; \
