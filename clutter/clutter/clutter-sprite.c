@@ -1114,6 +1114,22 @@ clutter_sprite_maybe_break_implicit_grab (ClutterSprite *sprite,
       priv->implicit_grab_actor = parent;
       clutter_actor_set_implicitly_grabbed (priv->implicit_grab_actor, TRUE);
     }
+  else
+    {
+      /* No mapped ancestor left to hand the implicit grab off to - the
+       * whole grab lineage just got torn down (e.g. a window unmapped by
+       * clicking its own minimize button, mid-press). Unlike the transfer-
+       * to-parent case above, the gesture can never complete normally now,
+       * so fully cancel it exactly like cleanup_implicit_grab() does.
+       * Otherwise press_count stays stuck elevated forever, and every
+       * later press anywhere else on this device is silently misrouted
+       * through a stale event_emission_chain instead of a fresh one built
+       * for its own real target - see
+       * project_226_minimize_click_swallows_input.md. */
+      g_array_remove_range (priv->event_emission_chain, 0,
+                            priv->event_emission_chain->len);
+      priv->press_count = 0;
+    }
 
   clutter_sprite_invalidate_cursor (sprite);
 }
