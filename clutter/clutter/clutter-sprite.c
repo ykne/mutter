@@ -1107,29 +1107,35 @@ clutter_sprite_maybe_break_implicit_grab (ClutterSprite *sprite,
   clutter_actor_set_implicitly_grabbed (priv->implicit_grab_actor, FALSE);
   priv->implicit_grab_actor = NULL;
 
+  /* Handing the implicit-grab bookkeeping off to a mapped parent (previous
+   * behavior below, now removed) assumes the original press's matching
+   * BUTTON_RELEASE will still arrive and complete the gesture normally
+   * against that parent. That does not hold when the actor unmapped
+   * because its whole window went away (e.g. clicking a window's own
+   * minimize button, mid-press) - confirmed via live tracing (see
+   * project_226_minimize_click_swallows_input.md) that the matching
+   * release never reaches clutter_sprite_propagate_event() at all in
+   * that case, and a mapped parent (the window's own actor, then its
+   * ancestors up to the always-mapped stage) is *always* found, so the
+   * transfer-to-parent branch fired every time and priv->press_count was
+   * NEVER reset. Every later press anywhere else on this device then hit
+   * setup_implicit_grab()'s "second button already down" branch instead
+   * of building a fresh grab/event_emission_chain for its own real
+   * target, so the event silently dispatched through a stale, mismatched
+   * chain rather than the actor it actually landed on - stuck
+   * indefinitely, no crash, no error, nothing below Clutter's own
+   * dispatch shows anything wrong.
+   *
+   * Since there is no reliable way here to tell "the release will still
+   * arrive against a surviving ancestor" apart from "this actor's entire
+   * window is gone", always fully cancel the gesture instead - matching
+   * cleanup_implicit_grab()'s normal end-of-gesture reset. */
   if (parent)
-    {
-      g_assert (clutter_actor_is_mapped (parent));
+    g_assert (clutter_actor_is_mapped (parent));
 
-      priv->implicit_grab_actor = parent;
-      clutter_actor_set_implicitly_grabbed (priv->implicit_grab_actor, TRUE);
-    }
-  else
-    {
-      /* No mapped ancestor left to hand the implicit grab off to - the
-       * whole grab lineage just got torn down (e.g. a window unmapped by
-       * clicking its own minimize button, mid-press). Unlike the transfer-
-       * to-parent case above, the gesture can never complete normally now,
-       * so fully cancel it exactly like cleanup_implicit_grab() does.
-       * Otherwise press_count stays stuck elevated forever, and every
-       * later press anywhere else on this device is silently misrouted
-       * through a stale event_emission_chain instead of a fresh one built
-       * for its own real target - see
-       * project_226_minimize_click_swallows_input.md. */
-      g_array_remove_range (priv->event_emission_chain, 0,
-                            priv->event_emission_chain->len);
-      priv->press_count = 0;
-    }
+  g_array_remove_range (priv->event_emission_chain, 0,
+                        priv->event_emission_chain->len);
+  priv->press_count = 0;
 
   clutter_sprite_invalidate_cursor (sprite);
 }
