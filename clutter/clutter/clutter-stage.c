@@ -3470,6 +3470,8 @@ clutter_stage_get_event_actor (ClutterStage       *stage,
         ClutterSprite *sprite;
 
         sprite = clutter_backend_get_sprite (backend, stage, event);
+        if (!sprite)
+          return NULL;
 
         return clutter_focus_get_current_actor (CLUTTER_FOCUS (sprite));
       }
