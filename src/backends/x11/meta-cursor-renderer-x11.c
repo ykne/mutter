@@ -49,6 +49,11 @@ struct _MetaCursorRendererX11
   gboolean force_sw_cursor;
   MetaOverlay *sw_cursor_overlay;
   guint force_sw_cursor_poll_id;
+
+  gboolean sw_cursor_last_valid;
+  short sw_cursor_last_x;
+  short sw_cursor_last_y;
+  unsigned long sw_cursor_last_serial;
 };
 
 G_DEFINE_FINAL_TYPE (MetaCursorRendererX11, meta_cursor_renderer_x11, META_TYPE_CURSOR_RENDERER);
@@ -193,6 +198,7 @@ update_sw_cursor_overlay (MetaCursorRendererX11 *x11,
   image = XFixesGetCursorImage (xdisplay);
   if (!image)
     {
+      x11->sw_cursor_last_valid = FALSE;
       meta_overlay_set_visible (x11->sw_cursor_overlay, FALSE);
       return;
     }
@@ -202,10 +208,37 @@ update_sw_cursor_overlay (MetaCursorRendererX11 *x11,
 
   if (width <= 0 || height <= 0)
     {
+      x11->sw_cursor_last_valid = FALSE;
       meta_overlay_set_visible (x11->sw_cursor_overlay, FALSE);
       XFree (image);
       return;
     }
+
+  /* This runs unconditionally on a 16ms timer (see force_sw_cursor_poll_cb's
+   * own doc comment) whether or not the cursor actually moved or changed
+   * shape - on a host with GPU-accelerated compositing that's cheap, but on
+   * this VM class (no hardware cursor plane AND no GL/glamor, confirmed via
+   * project_edge_resize_broken.md and this session's own idle-CPU
+   * investigation) every tick was forcing a full texture rebuild plus a
+   * full software-composited stage repaint, 62.5 times a second, even at
+   * total desktop idle - measured at 30-40% of a CPU core sustained, purely
+   * from this. cursor_serial only changes when the shape actually changes
+   * (XFixes's own purpose for the field); x/y cover real pointer motion.
+   * Skip the expensive texture/stage-overlay work entirely when neither
+   * changed since the last tick. */
+  if (x11->sw_cursor_last_valid &&
+      x11->sw_cursor_last_x == image->x &&
+      x11->sw_cursor_last_y == image->y &&
+      x11->sw_cursor_last_serial == image->cursor_serial)
+    {
+      XFree (image);
+      return;
+    }
+
+  x11->sw_cursor_last_valid = TRUE;
+  x11->sw_cursor_last_x = image->x;
+  x11->sw_cursor_last_y = image->y;
+  x11->sw_cursor_last_serial = image->cursor_serial;
 
   /* XFixesCursorImage.pixels is an array of `unsigned long`, one
    * premultiplied-ARGB32 pixel per element (the protocol's 32-bit wire
