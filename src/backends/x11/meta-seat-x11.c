@@ -2544,6 +2544,19 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
                                              xev->root_x,
                                              xev->root_y);
 
+            /* Nothing currently claims X11 touch-sequence ownership to
+             * reject a sequence (gnome-shell's touch-gesture recognition
+             * runs on already-delivered events via Clutter's gesture-action
+             * framework, not via the old X11-specific ownership gate) - so
+             * always accept immediately, otherwise the X server never
+             * finalizes/delivers the pointer-emulated ButtonPress/Release
+             * for this sequence and a tap silently never turns into a
+             * click, even though TouchBegin/Update (hence pointer motion)
+             * are still delivered unconditionally either way. */
+            meta_backend_finish_touch_sequence (meta_seat_x11_get_backend (seat),
+                                                sequence,
+                                                META_SEQUENCE_ACCEPTED);
+
             if (xev->flags & XITouchEmulatingPointer)
               seat->pointer_emulating_sequence = sequence;
             else if (seat->pointer_emulating_sequence == sequence)
