@@ -1324,8 +1324,17 @@ handle_other_xevent (MetaX11Display *x11_display,
       MetaCursorTracker *cursor_tracker =
         meta_backend_get_cursor_tracker (backend);
 
-      meta_cursor_tracker_x11_handle_xevent (META_CURSOR_TRACKER_X11 (cursor_tracker),
-                                             event);
+      /* This MetaX11Display (and its XFixesCursorNotify events) exists
+       * even under a Wayland session, to manage Xwayland-connected X11
+       * clients - but meta_backend_get_cursor_tracker() there returns a
+       * MetaCursorTrackerNative, not a MetaCursorTrackerX11. The
+       * unguarded cast below crashed (SIGSEGV in g_object_unref, via a
+       * garbage field read through the wrong struct layout) the first
+       * time an XFixesCursorNotify arrived in a live Wayland+Xwayland
+       * session - only ever exercised against the X11-CM backend before. */
+      if (META_IS_CURSOR_TRACKER_X11 (cursor_tracker))
+        meta_cursor_tracker_x11_handle_xevent (META_CURSOR_TRACKER_X11 (cursor_tracker),
+                                               event);
       return;
     }
 
