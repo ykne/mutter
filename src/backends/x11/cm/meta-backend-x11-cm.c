@@ -64,6 +64,16 @@ struct _MetaBackendX11Cm
   char *keymap_model;
   int locked_group;
 
+  /* The exact MetaKeymapDescription last passed to set_keymap_async(),
+   * returned as-is (same pointer) from get_keymap_description(). Needed
+   * because MetaKeymapDescription::direct_equal() is a pointer-identity
+   * check: gnome-shell's KeyboardManager.isExternal() compares this
+   * against the description it applied itself, and that can only ever
+   * match if get_keymap_description() hands back the identical object
+   * rather than reconstructing an equivalent-but-distinct one from the
+   * raw rule strings below on every call. */
+  MetaKeymapDescription *keymap_description;
+
   MetaInputSettings *input_settings;
 };
 
@@ -420,21 +430,13 @@ meta_backend_x11_cm_get_keymap_description (MetaBackend *backend)
   MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
   MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
 
-  /* If set_keymap_async() has already run at least once, its rule
-   * strings mirror the current server-side keymap exactly (see
-   * apply_keymap() above) - reuse those directly rather than
-   * round-tripping through the X server again. */
-  if (x11_cm->keymap_layouts &&
-      x11_cm->keymap_variants &&
-      x11_cm->keymap_options &&
-      x11_cm->keymap_model)
-    {
-      return meta_keymap_description_new_from_rules (x11_cm->keymap_model,
-                                                      x11_cm->keymap_layouts,
-                                                      x11_cm->keymap_variants,
-                                                      x11_cm->keymap_options,
-                                                      NULL, NULL);
-    }
+  /* If set_keymap_async() has already run at least once, hand back the
+   * exact same MetaKeymapDescription object it was given rather than
+   * building a fresh, merely rules-equivalent one - see the struct
+   * field comment on keymap_description above for why identity matters
+   * here. */
+  if (x11_cm->keymap_description)
+    return x11_cm->keymap_description;
   else
     {
       Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
@@ -475,6 +477,16 @@ meta_backend_x11_cm_set_keymap_async (MetaBackend           *backend,
   MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
   Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
   const char *model = NULL, *layout = NULL, *variant = NULL, *options = NULL;
+
+  /* Retain the caller's own description object (not a copy) so
+   * get_keymap_description() can return this exact pointer back later -
+   * see the struct field comment on keymap_description above. */
+  if (x11_cm->keymap_description != description)
+    {
+      g_clear_pointer (&x11_cm->keymap_description,
+                       meta_keymap_description_unref);
+      x11_cm->keymap_description = meta_keymap_description_ref (description);
+    }
 
   /* MetaBackendClass::set_keymap_async() used to take plain rule strings
    * directly and be paired with a separate set_keymap_layout_group_async();
@@ -614,6 +626,8 @@ meta_backend_x11_cm_finalize (GObject *object)
   MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (object);
 
   g_clear_pointer (&x11_cm->display_name, g_free);
+  g_clear_pointer (&x11_cm->keymap_description,
+                   meta_keymap_description_unref);
 
   G_OBJECT_CLASS (meta_backend_x11_cm_parent_class)->finalize (object);
 }
