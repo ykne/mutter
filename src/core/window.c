@@ -7780,7 +7780,21 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
    * we have to take special care not to act for an override-redirect window.
    */
   if (window->override_redirect)
-    return CLUTTER_EVENT_PROPAGATE;
+    {
+      /* This event arrived through the passive click-to-focus SYNC grab
+       * (see the window->unmanaging comment above) even though this
+       * window doesn't participate in click-to-focus - thaw it here
+       * too, or the pointer (and, for a combined grab, the keyboard)
+       * freezes for the rest of the session exactly like that case. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
+      return CLUTTER_EVENT_PROPAGATE;
+    }
 
   /* Don't focus panels--they must explicitly request focus.
    * See bug 160470
@@ -7892,7 +7906,22 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
                                              sprite,
                                              time_ms,
                                              NULL))
-                return CLUTTER_EVENT_STOP;
+                {
+                  /* Thaw the passive click-to-focus SYNC grab before
+                   * handing off to the interactive resize op - the
+                   * device stays frozen (no motion/release events
+                   * delivered to anyone) until this runs, which would
+                   * otherwise stall the resize itself, not just leak
+                   * the grab afterward. */
+#ifdef HAVE_X11
+                  if (META_IS_BACKEND_X11 (backend))
+                    {
+                      meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                                     META_EVENT_MODE_THAW);
+                    }
+#endif
+                  return CLUTTER_EVENT_STOP;
+                }
             }
         }
     }
@@ -7905,6 +7934,17 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
                              META_WINDOW_MENU_WM,
                              (int) x, (int) y);
 
+      /* Thaw the passive click-to-focus SYNC grab - mutter is fully
+       * done with this click (showing the window menu, not forwarding
+       * to the client), so release the device the same way the
+       * unmodified-click path below does. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
       return CLUTTER_EVENT_STOP;
     }
   else if (is_window_grab && (int) button == 1)
@@ -7917,8 +7957,39 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
                                          sprite,
                                          time_ms,
                                          NULL))
-            return CLUTTER_EVENT_STOP;
+            {
+              /* Same reasoning as the resize-op case above: the device
+               * must be thawed for the interactive move op's own
+               * subsequent motion/release events to be delivered at
+               * all. */
+#ifdef HAVE_X11
+              if (META_IS_BACKEND_X11 (backend))
+                {
+                  meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                                 META_EVENT_MODE_THAW);
+                }
+#endif
+              return CLUTTER_EVENT_STOP;
+            }
         }
+    }
+
+  /* Any path reaching here without already returning did not REPLAY the
+   * click to the client (the unmodified-click branch above already did
+   * that) - thaw the passive click-to-focus SYNC grab so a click mutter
+   * itself doesn't otherwise handle (an unmatched button, a resize/move
+   * op that failed to start, or a resize click that computed no
+   * direction) doesn't leave the device frozen for the rest of the
+   * session. */
+  if (!unmodified)
+    {
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
     }
 
   g_message ("INSTR ungrabbed_event exit t=%" G_GINT64_FORMAT,
