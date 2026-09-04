@@ -30,9 +30,6 @@ G_DECLARE_FINAL_TYPE (MetaWindowActorX11,
                       META, WINDOW_ACTOR_X11,
                       MetaWindowActor)
 
-void meta_window_actor_x11_process_x11_damage (MetaWindowActorX11 *actor_x11,
-                                               XDamageNotifyEvent *event);
-
 #ifdef HAVE_X11
 gboolean meta_window_actor_x11_should_unredirect (MetaWindowActorX11 *actor_x11);
 
