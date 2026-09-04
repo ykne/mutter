@@ -2065,10 +2065,6 @@ meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
 
   stage_xwindow = meta_backend_x11_get_xwindow (META_BACKEND_X11 (backend));
 
-  g_message ("INSTR set_stage_input_region n_rects=%d stage_xwindow=0x%lx "
-            "overlay=0x%lx", n_rects, (unsigned long) stage_xwindow,
-            (unsigned long) x11_display->composite_overlay_window);
-
   region = XFixesCreateRegion (x11_display->xdisplay, rects, n_rects);
   XFixesSetWindowShapeRegion (x11_display->xdisplay,
                               stage_xwindow,

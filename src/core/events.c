@@ -112,18 +112,6 @@ get_window_for_event (MetaDisplay        *display,
 
   window_actor = meta_window_actor_from_actor (event_actor);
 
-  if (clutter_event_type (event) == CLUTTER_BUTTON_PRESS)
-    {
-      float ex = 0, ey = 0;
-      clutter_event_get_coords (event, &ex, &ey);
-      g_message ("INSTR get_window_for_event event_actor=%p (%s) name=%s "
-                 "window_actor=%p coords=%f,%f",
-                 event_actor,
-                 event_actor ? G_OBJECT_TYPE_NAME (event_actor) : "null",
-                 event_actor ? clutter_actor_get_name (event_actor) : "null",
-                 window_actor, ex, ey);
-    }
-
   if (window_actor)
     return meta_window_actor_get_meta_window (window_actor);
   else
@@ -193,20 +181,8 @@ meta_display_handle_event (MetaDisplay        *display,
 
   event_type = clutter_event_type (event);
 
-  if (event_type == CLUTTER_BUTTON_PRESS)
-    {
-      g_message ("INSTR handle_event enter type=BUTTON_PRESS has_grab=%d t=%"
-                 G_GINT64_FORMAT, has_grab, g_get_monotonic_time ());
-    }
-
   if (meta_display_process_captured_input (display, event))
     {
-      if (event_type == CLUTTER_BUTTON_PRESS)
-        {
-          g_message ("INSTR handle_event captured_input consumed it, "
-                     "returning early t=%" G_GINT64_FORMAT,
-                     g_get_monotonic_time ());
-        }
       /* A globally-keybound keycode's passive XIGrabModeSync grab
        * freezes the keyboard device the instant X delivers the matching
        * KEY_PRESS, regardless of which mutter code path ends up
@@ -321,13 +297,6 @@ meta_display_handle_event (MetaDisplay        *display,
     }
 
   window = get_window_for_event (display, event, event_actor);
-
-  if (event_type == CLUTTER_BUTTON_PRESS)
-    {
-      g_message ("INSTR handle_event get_window_for_event window=%p "
-                 "stage_has_grab=%d t=%" G_GINT64_FORMAT,
-                 window, stage_has_grab (display), g_get_monotonic_time ());
-    }
 
   if (window && !window->override_redirect &&
       (event_type == CLUTTER_KEY_PRESS ||
@@ -458,21 +427,7 @@ meta_display_handle_event (MetaDisplay        *display,
     return CLUTTER_EVENT_PROPAGATE;
 
   if (stage_has_grab (display))
-    {
-      if (event_type == CLUTTER_BUTTON_PRESS)
-        {
-          g_message ("INSTR handle_event second stage_has_grab check TRUE, "
-                     "bailing before ungrabbed_event t=%" G_GINT64_FORMAT,
-                     g_get_monotonic_time ());
-        }
-      return CLUTTER_EVENT_PROPAGATE;
-    }
-
-  if (event_type == CLUTTER_BUTTON_PRESS)
-    {
-      g_message ("INSTR handle_event about to check window (window=%p) t=%"
-                 G_GINT64_FORMAT, window, g_get_monotonic_time ());
-    }
+    return CLUTTER_EVENT_PROPAGATE;
 
   if (window)
     {
