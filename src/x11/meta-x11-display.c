@@ -1962,25 +1962,28 @@ create_guard_window (MetaX11Display *x11_display)
   XStoreName (x11_display->xdisplay, guard_window, "mutter guard window");
 
 #ifdef HAVE_X11
-  if (!meta_is_wayland_compositor ())
-    {
-      MetaBackendX11 *backend =
-        META_BACKEND_X11 (backend_from_x11_display (x11_display));
-      Display *backend_xdisplay = meta_backend_x11_get_xdisplay (backend);
-      unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
-      XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
+  {
+    MetaBackend *backend = backend_from_x11_display (x11_display);
 
-      XISetMask (mask.mask, XI_ButtonPress);
-      XISetMask (mask.mask, XI_ButtonRelease);
-      XISetMask (mask.mask, XI_Motion);
+    if (META_IS_BACKEND_X11 (backend))
+      {
+        MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
+        Display *backend_xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
+        unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+        XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
 
-      /* Sync on the connection we created the window on to
-       * make sure it's created before we select on it on the
-       * backend connection. */
-      XSync (x11_display->xdisplay, False);
+        XISetMask (mask.mask, XI_ButtonPress);
+        XISetMask (mask.mask, XI_ButtonRelease);
+        XISetMask (mask.mask, XI_Motion);
 
-      XISelectEvents (backend_xdisplay, guard_window, &mask, 1);
-    }
+        /* Sync on the connection we created the window on to
+         * make sure it's created before we select on it on the
+         * backend connection. */
+        XSync (x11_display->xdisplay, False);
+
+        XISelectEvents (backend_xdisplay, guard_window, &mask, 1);
+      }
+  }
 #endif
 
   meta_stack_tracker_record_add (x11_display->display->stack_tracker,
