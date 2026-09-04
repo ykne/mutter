@@ -1853,9 +1853,25 @@ window_has_buffer (MetaWindow *window)
    * distinct from the window simply being mapped and damage-tracked -
    * content is implicitly present once that's true, which
    * init_surface_actor() (meta-window-actor.c) already guarantees by
-   * the time this is ever checked. */
+   * the time this is ever checked.
+   *
+   * client_type == X11 alone doesn't distinguish a plain X11-CM window
+   * from a MetaWindowXwayland instance under a real Wayland+Xwayland
+   * session: both share it via MetaWindowX11's constructed() vfunc,
+   * which MetaWindowXwayland doesn't override (genuine upstream
+   * design, not specific to this fork). An Xwayland window still needs
+   * its own wl_surface to actually have content - unlike a plain X11
+   * window, it doesn't get that implicitly just from being mapped -
+   * so exclude it here and let it fall through to the same
+   * surface/buffer check a native Wayland window gets below. */
+#ifdef HAVE_XWAYLAND
+  if (window->client_type == META_WINDOW_CLIENT_TYPE_X11 &&
+      !META_IS_WINDOW_XWAYLAND (window))
+    return TRUE;
+#else
   if (window->client_type == META_WINDOW_CLIENT_TYPE_X11)
     return TRUE;
+#endif
 
   {
     MetaWaylandSurface *surface = meta_window_get_wayland_surface (window);
