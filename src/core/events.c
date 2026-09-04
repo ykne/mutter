@@ -67,24 +67,30 @@ static gboolean
 stage_has_grab (MetaDisplay *display)
 {
   ClutterStage *stage = stage_from_display (display);
-  ClutterActor *grab_actor = clutter_stage_get_grab_actor (stage);
 
-  /* Clutter falls back to an implicit grab on the stage itself when a
-   * button press isn't claimed by any reactive actor (e.g. a plain
-   * MetaWindowActor for a composited X11 client, which isn't reactive -
-   * real input routing for those goes through X, not Clutter's actor
-   * tree) - see clutter_stage_notify_action_implicit_grab() and the
-   * grab bookkeeping in clutter_stage_grab()/_unlink_grab(). That's
-   * harmless everywhere else, but under the X11 CM backend
-   * meta_backend_x11_cm_translate_device_event() spoofs every device
-   * event's window to the stage's own xwindow so Clutter's
-   * single-window-per-stage assumption still works, which is what
-   * makes button presses hit this fallback in the first place. Treating
-   * that self-grab the same as a real modal grab (an open popup menu,
-   * the overview, etc.) made get_window_for_event() and the
-   * unmodified-click handling below bail out on every single click,
-   * so exclude it here. */
-  return grab_actor != NULL && grab_actor != CLUTTER_ACTOR (stage);
+  /* This used to also exclude grab_actor == CLUTTER_ACTOR (stage), on
+   * the theory that Clutter falls back to an "implicit" grab on the
+   * stage itself when a button press isn't claimed by any reactive
+   * actor. That premise doesn't hold: ClutterStage's topmost_grab is
+   * only ever set by clutter_grab_activate(), called from
+   * clutter_stage_grab()/clutter_stage_grab_inactive() - both of which
+   * require an explicit actor argument from the caller. There is no
+   * Clutter-internal path that grabs the stage on its own.
+   *
+   * grab_actor == stage in practice means a real, deliberate whole-stage
+   * modal grab - gnome-shell's Main.pushModal(global.stage, ...) (which
+   * calls exactly clutter_stage_grab(stage, stage)) is exactly this,
+   * and it's not a rare case: the overview (overview.js), the GDM login
+   * screen (loginDialog.js), and workspace-switch animations
+   * (workspaceAnimation.js) all use it. The exclusion made
+   * get_window_for_event() and the unmodified-click handling below
+   * treat all of those as "no grab", letting clicks fall through to
+   * mutter's normal per-window focus/raise/move handling instead of
+   * being properly captured by the active modal grab - confirmed by
+   * mutter's own test harness (src/tests/meta-test-shell.c) using the
+   * identical clutter_stage_grab(stage, CLUTTER_ACTOR (stage)) pattern
+   * to simulate the overview's grab. */
+  return clutter_stage_get_grab_actor (stage) != NULL;
 }
 
 static MetaWindow *
