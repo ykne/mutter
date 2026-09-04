@@ -1957,6 +1957,7 @@ create_guard_window (MetaX11Display *x11_display)
   /* https://bugzilla.gnome.org/show_bug.cgi?id=710346 */
   XStoreName (x11_display->xdisplay, guard_window, "mutter guard window");
 
+#ifdef HAVE_X11
   if (!meta_is_wayland_compositor ())
     {
       MetaBackendX11 *backend =
@@ -1976,6 +1977,7 @@ create_guard_window (MetaX11Display *x11_display)
 
       XISelectEvents (backend_xdisplay, guard_window, &mask, 1);
     }
+#endif
 
   meta_stack_tracker_record_add (x11_display->display->stack_tracker,
                                  guard_window,
