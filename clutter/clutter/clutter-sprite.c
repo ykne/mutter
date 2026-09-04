@@ -32,6 +32,7 @@
 #include "clutter/clutter-event-private.h"
 #include "clutter/clutter-focus-private.h"
 #include "clutter/clutter-grab.h"
+#include "clutter/clutter-mutter.h"
 #include "clutter/clutter-private.h"
 #include "clutter/clutter-seat-private.h"
 #include "clutter/clutter-stage.h"
@@ -108,6 +109,8 @@ static void clutter_sprite_emit_crossing_event (ClutterSprite      *sprite,
                                                 const ClutterEvent *event,
                                                 ClutterActor       *deepmost,
                                                 ClutterActor       *topmost);
+
+static void arm_implicit_grab_watchdog (ClutterSprite *sprite);
 
 typedef enum
 {
@@ -189,6 +192,48 @@ implicit_grab_watchdog_cb (gpointer user_data)
 {
   ClutterSprite *sprite = user_data;
   ClutterSpritePrivate *priv = clutter_sprite_get_instance_private (sprite);
+
+  /* A genuinely abandoned grab (the scenario this watchdog exists for)
+   * looks identical, from this sprite's point of view, to a legitimate
+   * press-and-hold with no motion (a touchscreen long-press, a held
+   * scrollbar/spin-button repeat, or just holding a mouse button still) -
+   * both produce zero further events for the whole timeout window.
+   * Before presuming abandonment, ask the X server directly whether a
+   * button is still actually down: XIQueryPointer() (via
+   * clutter_seat_query_state()) is independent of whether Clutter ever
+   * sees another event for this device, unlike everything else this
+   * sprite tracks. If a button is still genuinely held, this isn't
+   * abandoned - just quiet - so push the deadline back out instead of
+   * force-cancelling a live interaction.
+   *
+   * Scoped to the pointer case (priv->sequence == NULL) only: touch
+   * sequences have no equivalent independent state to query - the only
+   * per-sequence tracking available (MetaSeatX11's touch_coords table)
+   * is populated and cleared by the very same TOUCH_BEGIN/END events
+   * this watchdog exists to route around the loss of, so checking it
+   * would just ask this sprite's own ambiguous state a second time. */
+  if (priv->sequence == NULL)
+    {
+      ClutterStage *stage = clutter_focus_get_stage (CLUTTER_FOCUS (sprite));
+      ClutterContext *context = clutter_actor_get_context (CLUTTER_ACTOR (stage));
+      ClutterBackend *backend = clutter_context_get_backend (context);
+      ClutterSeat *seat = clutter_backend_get_default_seat (backend);
+      ClutterModifierType modifiers = 0;
+
+      if (clutter_seat_query_state (seat, sprite, NULL, &modifiers) &&
+          (modifiers & (CLUTTER_BUTTON1_MASK | CLUTTER_BUTTON2_MASK |
+                       CLUTTER_BUTTON3_MASK | CLUTTER_BUTTON4_MASK |
+                       CLUTTER_BUTTON5_MASK)))
+        {
+          CLUTTER_NOTE (GRABS,
+                        "[device=%p sequence=%p] Implicit grab watchdog "
+                        "fired but a button is still genuinely held down - "
+                        "not abandoned, rescheduling",
+                        priv->sprite_device, priv->sequence);
+          arm_implicit_grab_watchdog (sprite);
+          return G_SOURCE_REMOVE;
+        }
+    }
 
   CLUTTER_NOTE (GRABS,
                 "[device=%p sequence=%p] Implicit grab watchdog fired - no "
