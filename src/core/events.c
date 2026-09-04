@@ -201,6 +201,24 @@ meta_display_handle_event (MetaDisplay        *display,
                      "returning early t=%" G_GINT64_FORMAT,
                      g_get_monotonic_time ());
         }
+      /* A globally-keybound keycode's passive XIGrabModeSync grab
+       * freezes the keyboard device the instant X delivers the matching
+       * KEY_PRESS, regardless of which mutter code path ends up
+       * consuming it - see the THAW/REPLAY comment further down in this
+       * function (08c1b797f). A captured-input grab (e.g. a gesture or
+       * eavesdrop grab) can consume a key event before that later logic
+       * ever runs, leaving the device frozen just like the original bug
+       * this function already fixed on its normal path. THAW here is
+       * always correct (never REPLAY): we're returning STOP, keeping
+       * this event as our own. XIAllowEvents() is a no-op if this
+       * particular event didn't actually engage a SYNC freeze. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend) && IS_KEY_EVENT (event_type))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
       return CLUTTER_EVENT_STOP;
     }
 
@@ -208,7 +226,19 @@ meta_display_handle_event (MetaDisplay        *display,
     {
       a11y_grabbed = meta_a11y_manager_notify_clients (a11y_manager, event);
       if (a11y_grabbed)
-        return CLUTTER_EVENT_STOP;
+        {
+          /* Same reasoning as the captured-input case above: an AT-SPI
+           * keystroke listener (e.g. Orca) can consume a globally-bound
+           * key before the THAW/REPLAY logic further down ever runs. */
+#ifdef HAVE_X11
+          if (META_IS_BACKEND_X11 (backend))
+            {
+              meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                             META_EVENT_MODE_THAW);
+            }
+#endif
+          return CLUTTER_EVENT_STOP;
+        }
     }
   else if (event_type == CLUTTER_MOTION &&
            !clutter_event_get_device_tool (event))
