@@ -2035,9 +2035,28 @@ meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
                                          XRectangle      *rects,
                                          int              n_rects)
 {
+  /* An MetaX11Display exists both under the X11 CM backend and under
+   * the native/Wayland backend (servicing Xwayland-connected clients),
+   * since this file compiles whenever have_x11_client is true - but
+   * the stage/overlay-window input-shaping this function does is only
+   * meaningful for mutter's own X11 CM compositor (meta-compositor-x11.c
+   * is its only internal caller). gnome-shell's ShellGlobal also calls
+   * this META_EXPORT function directly (see the comment on its
+   * declaration in meta-x11-display-private.h), guarded only by
+   * #ifdef HAVE_X11 and an x11_display != NULL check - neither of which
+   * rules out a real Wayland+Xwayland session, where backend is
+   * MetaBackendNative and META_BACKEND_X11() would be an invalid cast -
+   * so this is a no-op outside the X11 CM backend, not just outside
+   * HAVE_X11 builds. */
+#ifdef HAVE_X11
   MetaBackend *backend = backend_from_x11_display (x11_display);
-  Window stage_xwindow = meta_backend_x11_get_xwindow (META_BACKEND_X11 (backend));
+  Window stage_xwindow;
   XserverRegion region;
+
+  if (!META_IS_BACKEND_X11 (backend))
+    return;
+
+  stage_xwindow = meta_backend_x11_get_xwindow (META_BACKEND_X11 (backend));
 
   g_message ("INSTR set_stage_input_region n_rects=%d stage_xwindow=0x%lx "
             "overlay=0x%lx", n_rects, (unsigned long) stage_xwindow,
@@ -2056,6 +2075,7 @@ meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
                          x11_display->stage_input_region);
 
   x11_display->stage_input_region = region;
+#endif
 }
 
 static void
