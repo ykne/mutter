@@ -1689,14 +1689,18 @@ meta_x11_display_reload_cursor (MetaX11Display *x11_display)
 #ifdef HAVE_X11
   {
     MetaBackend *backend = backend_from_x11_display (x11_display);
+    MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
 
-    if (META_IS_BACKEND_X11 (backend))
-      {
-        MetaCursorTracker *cursor_tracker =
-          meta_backend_get_cursor_tracker (backend);
-
-        meta_cursor_tracker_x11_invalidate_cursor (META_CURSOR_TRACKER_X11 (cursor_tracker));
-      }
+    /* Guard on the cursor tracker's own type, not the backend's - a
+     * nested X11 backend (MetaBackendX11Nested) satisfies
+     * META_IS_BACKEND_X11() too (it's a subclass) but never overrides
+     * create_cursor_tracker(), so it inherits the base MetaBackend's
+     * plain (non-X11) cursor tracker. The sibling call site in
+     * src/x11/events.c (handle_other_xevent()'s XFixesCursorNotify
+     * handling) already guards on META_IS_CURSOR_TRACKER_X11() for
+     * exactly this reason - match it here. */
+    if (META_IS_CURSOR_TRACKER_X11 (cursor_tracker))
+      meta_cursor_tracker_x11_invalidate_cursor (META_CURSOR_TRACKER_X11 (cursor_tracker));
   }
 #endif
 
