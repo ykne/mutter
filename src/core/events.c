@@ -242,6 +242,40 @@ meta_display_handle_event (MetaDisplay        *display,
 
   if (wayland_compositor)
     meta_wayland_compositor_update (wayland_compositor, event);
+#ifdef HAVE_X11
+  else if (META_IS_BACKEND_X11 (backend))
+    {
+      /* meta_display_handle_window_enter() (sloppy/mouse focus-follows-
+       * pointer, see meta_prefs_get_focus_mode()) has exactly one caller
+       * in the whole tree: meta_wayland_pointer_update(), reached only
+       * via meta_wayland_compositor_update() above - which is never
+       * called under the X11 backend (there is no Wayland compositor
+       * role there, see meta_context_start()). So under X11, changing
+       * focus-mode to "sloppy" or "mouse" had zero effect: the GSettings
+       * key was read correctly, but nothing ever told mutter which
+       * window the pointer just entered. XI_Enter/XI_Leave are already
+       * selected on client windows (window-x11.c) and already reach
+       * here as ordinary CLUTTER_ENTER/CLUTTER_LEAVE events (via
+       * meta-seat-x11.c's clutter_event_crossing_new()) - mirror
+       * meta_wayland_pointer_update()'s own handling of those event
+       * types, using get_window_for_event() (already stage_has_grab()-
+       * aware, so this correctly stays inert during an active modal
+       * grab) in place of the Wayland surface-to-window lookup. */
+      if ((event_type == CLUTTER_ENTER || event_type == CLUTTER_LEAVE) &&
+          !clutter_event_get_event_sequence (event))
+        {
+          MetaWindow *enter_window;
+          graphene_point_t pos;
+
+          clutter_event_get_coords (event, &pos.x, &pos.y);
+          enter_window = get_window_for_event (display, event, event_actor);
+
+          meta_display_handle_window_enter (display, enter_window,
+                                            clutter_event_get_time (event),
+                                            (int) pos.x, (int) pos.y);
+        }
+    }
+#endif
 
   if (event_type == CLUTTER_PAD_BUTTON_PRESS ||
       event_type == CLUTTER_PAD_BUTTON_RELEASE ||
