@@ -1315,9 +1315,6 @@ meta_backend_x11_allow_events (MetaBackendX11     *backend_x11,
     META_VIRTUAL_CORE_KEYBOARD_ID : META_VIRTUAL_CORE_POINTER_ID;
   time_ms = clutter_event_get_time (event);
 
-  g_message ("CLICKDBG allow_events mode=%d device_id=%d time=%u",
-            event_mode, device_id, time_ms);
-
   switch (event_mode)
     {
     case META_EVENT_MODE_KEEP_FROZEN:

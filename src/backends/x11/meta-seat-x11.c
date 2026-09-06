@@ -2119,21 +2119,6 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
   if (!xi_event)
     return NULL;
 
-  if (xi_event->evtype == XI_ButtonPress ||
-      xi_event->evtype == XI_ButtonRelease ||
-      xi_event->evtype == XI_TouchBegin ||
-      xi_event->evtype == XI_TouchUpdate ||
-      xi_event->evtype == XI_TouchEnd)
-    {
-      XIDeviceEvent *dbg_xev = (XIDeviceEvent *) xi_event;
-
-      g_message ("RAWXI evtype=%d deviceid=%d sourceid=%d detail=%d "
-                "flags=0x%x event_win=0x%lx child_win=0x%lx",
-                xi_event->evtype, dbg_xev->deviceid, dbg_xev->sourceid,
-                dbg_xev->detail, dbg_xev->flags,
-                (unsigned long) dbg_xev->event, (unsigned long) dbg_xev->child);
-    }
-
   if (cookie->evtype == XI_RawMotion ||
       cookie->evtype == XI_RawButtonPress ||
       cookie->evtype == XI_RawButtonRelease)

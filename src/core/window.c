@@ -7757,16 +7757,6 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
       event_type != CLUTTER_TOUCH_BEGIN)
     return CLUTTER_EVENT_PROPAGATE;
 
-  {
-    ClutterInputDevice *dbg_source = clutter_event_get_source_device (event);
-    g_message ("CLICKDBG ungrabbed_event window=%s type=%d emulated=%d "
-              "source=%s unmanaging=%d override_redirect=%d",
-              window->desc, event_type,
-              clutter_event_is_pointer_emulated (event),
-              dbg_source ? clutter_input_device_get_device_name (dbg_source) : "null",
-              window->unmanaging, window->override_redirect);
-  }
-
   /* A touchscreen tap/drag on this window generates BOTH a real
    * CLUTTER_TOUCH_BEGIN for the touch sequence itself AND (once
    * meta_backend_finish_touch_sequence() accepts touch ownership - see
