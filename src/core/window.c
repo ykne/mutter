@@ -7757,6 +7757,49 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
       event_type != CLUTTER_TOUCH_BEGIN)
     return CLUTTER_EVENT_PROPAGATE;
 
+  {
+    ClutterInputDevice *dbg_source = clutter_event_get_source_device (event);
+    g_message ("CLICKDBG ungrabbed_event window=%s type=%d emulated=%d "
+              "source=%s unmanaging=%d override_redirect=%d",
+              window->desc, event_type,
+              clutter_event_is_pointer_emulated (event),
+              dbg_source ? clutter_input_device_get_device_name (dbg_source) : "null",
+              window->unmanaging, window->override_redirect);
+  }
+
+  /* A touchscreen tap/drag on this window generates BOTH a real
+   * CLUTTER_TOUCH_BEGIN for the touch sequence itself AND (once
+   * meta_backend_finish_touch_sequence() accepts touch ownership - see
+   * meta-seat-x11.c) a synthetic pointer-emulated CLUTTER_BUTTON_PRESS
+   * for the exact same physical gesture, delivered as its own separate
+   * event. The mechanism to correlate/ignore the emulated shadow event
+   * (meta_seat_x11_get_pointer_emulating_sequence(),
+   * clutter_event_is_pointer_emulated()) exists but was never consulted
+   * here, so both events independently reached this function and could
+   * each start their own interactive move grab op for what the user
+   * experiences as a single drag. Confirmed live (real hardware,
+   * touchscreen): dragging a window by its titlebar via touch didn't
+   * work, and real mouse clicks stopped working afterward until
+   * something (e.g. toggling the overview) forced a THAW - the second,
+   * conflicting begin_grab_op() attempt left its own passive-grab THAW
+   * never reached. Ignore the emulated shadow here - the real touch
+   * event already does everything this function would - but still THAW
+   * the passive click-to-focus SYNC grab this specific button event
+   * engaged, the same as the window->unmanaging/override_redirect cases
+   * below already do, or it leaks exactly the same way. */
+  if (event_type == CLUTTER_BUTTON_PRESS &&
+      clutter_event_is_pointer_emulated (event))
+    {
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
+      return CLUTTER_EVENT_PROPAGATE;
+    }
+
   if (window->unmanaging)
     {
       /* The passive click-to-focus grab (XIGrabButton, SYNC mode - see
