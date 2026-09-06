@@ -300,18 +300,6 @@ handle_input_event (MetaBackendX11 *x11,
           meta_x11_barriers_process_xevent (barriers, input_event))
         return TRUE;
 
-      if (input_event->evtype == XI_ButtonPress)
-        {
-          XIDeviceEvent *dev_event = (XIDeviceEvent *) input_event;
-          g_message ("INSTR raw XI_ButtonPress event=0x%lx root=0x%lx "
-                     "child=0x%lx x=%f y=%f root_x=%f root_y=%f",
-                     (unsigned long) dev_event->event,
-                     (unsigned long) dev_event->root,
-                     (unsigned long) dev_event->child,
-                     dev_event->event_x, dev_event->event_y,
-                     dev_event->root_x, dev_event->root_y);
-        }
-
       maybe_spoof_event_as_stage_event (x11, input_event);
     }
 
@@ -1351,10 +1339,6 @@ meta_backend_x11_allow_events (MetaBackendX11     *backend_x11,
       g_assert_not_reached ();
       return;
     }
-
-  g_message ("INSTR allow_events called mode=%d device_id=%d time=%u t=%"
-             G_GINT64_FORMAT, event_mode, device_id, time_ms,
-             g_get_monotonic_time ());
 
   XIAllowEvents (priv->xdisplay, device_id, xi_event_mode, time_ms);
 }
