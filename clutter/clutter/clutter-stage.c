@@ -102,6 +102,7 @@ typedef struct _ClutterStagePrivate
   float viewport[4];
 
   ClutterGrab *topmost_grab;
+  ClutterGrabState seat_grab_state;
 
   GQueue *event_queue;
 
@@ -3138,6 +3139,7 @@ static void
 clutter_stage_sync_seat_grab (ClutterStage *stage,
                               gboolean      grabbed)
 {
+  ClutterStagePrivate *priv = clutter_stage_get_instance_private (stage);
   ClutterContext *context;
   ClutterBackend *backend;
   ClutterSeat *seat;
@@ -3147,9 +3149,22 @@ clutter_stage_sync_seat_grab (ClutterStage *stage,
   seat = clutter_backend_get_default_seat (backend);
 
   if (grabbed)
-    clutter_seat_grab (seat, clutter_get_current_event_time ());
+    {
+      /* meta_seat_x11_grab() (the X11 backend's grab vfunc) can
+       * genuinely return a state missing CLUTTER_GRAB_STATE_POINTER or
+       * _KEYBOARD when the underlying XIGrabDevice() call fails (e.g.
+       * AlreadyGrabbed, because another client such as an open GTK menu
+       * already holds an active grab) - capture the real result here so
+       * clutter_grab_get_seat_state() can report it, instead of the
+       * hardcoded CLUTTER_GRAB_STATE_ALL it used to unconditionally
+       * return. */
+      priv->seat_grab_state = clutter_seat_grab (seat, clutter_get_current_event_time ());
+    }
   else
-    clutter_seat_ungrab (seat, clutter_get_current_event_time ());
+    {
+      clutter_seat_ungrab (seat, clutter_get_current_event_time ());
+      priv->seat_grab_state = CLUTTER_GRAB_STATE_NONE;
+    }
 }
 
 /**
@@ -3366,18 +3381,25 @@ clutter_grab_dismiss (ClutterGrab *grab)
 ClutterGrabState
 clutter_grab_get_seat_state (ClutterGrab *grab)
 {
+  ClutterStagePrivate *priv;
+
   g_return_val_if_fail (grab != NULL, CLUTTER_GRAB_STATE_NONE);
 
-  /* clutter_stage_sync_seat_grab() now calls clutter_seat_grab() (see
+  /* clutter_stage_sync_seat_grab() calls clutter_seat_grab() (see
    * MetaSeatX11's grab_state field/meta_seat_x11_grab()) whenever the
    * stage's aggregate is-grabbed state goes false->true, and grabs
-   * every device together, so any active ClutterGrab does hold
-   * everything it asked for. What's still missing is real per-grab
+   * every device together - but that windowing-level grab can itself
+   * partially fail (e.g. XIGrabDevice() returning AlreadyGrabbed
+   * because another client, such as an open GTK menu, already holds an
+   * active grab), so "an active ClutterGrab exists" doesn't guarantee
+   * it holds everything it asked for. Report the real captured result
+   * instead of assuming success. What's still missing is real per-grab
    * tracking (e.g. a grab created while another is already active
    * doesn't get its own windowing-level state distinct from the
    * stage's), so this stays a stage-wide approximation rather than a
    * true per-grab value. */
-  return CLUTTER_GRAB_STATE_ALL;
+  priv = clutter_stage_get_instance_private (grab->stage);
+  return priv->seat_grab_state;
 }
 
 /**

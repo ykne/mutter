@@ -32,6 +32,9 @@
 #ifdef HAVE_X11
 #include "compositor/meta-surface-actor-x11.h"
 #endif
+#ifdef HAVE_XWAYLAND
+#include "wayland/meta-window-xwayland.h"
+#endif
 #include "core/boxes-private.h"
 #include "core/window-private.h"
 #include "meta/window.h"
@@ -601,10 +604,28 @@ init_surface_actor (MetaWindowActor *self)
    * the codebase) - no surface actor meant no damage tracking meant
    * no repaint ever got queued, leaving window content (and anything
    * else needing a repaint after the very first stage expose)
-   * permanently invisible. */
+   * permanently invisible.
+   *
+   * client_type == X11 alone doesn't distinguish a plain X11-CM window
+   * from a MetaWindowXwayland instance under a real Wayland+Xwayland
+   * session (both share it via MetaWindowX11's constructed() vfunc,
+   * genuine upstream design). A real Xwayland window can legitimately
+   * have surface == NULL here too - simply because its wl_surface
+   * hasn't committed yet, not because it has no Wayland surface at
+   * all like a plain X11 window - so building an X11 surface actor
+   * for it would be wrong: meta-xwayland-surface.c later calls
+   * meta_window_actor_assign_surface_actor() with the real Wayland
+   * one once it exists, discarding whatever this constructed in the
+   * meantime. Exclude it here. */
 #ifdef HAVE_X11
+#ifdef HAVE_XWAYLAND
+  if (!surface_actor && window->client_type == META_WINDOW_CLIENT_TYPE_X11 &&
+      !META_IS_WINDOW_XWAYLAND (window))
+    surface_actor = meta_surface_actor_x11_new (window);
+#else
   if (!surface_actor && window->client_type == META_WINDOW_CLIENT_TYPE_X11)
     surface_actor = meta_surface_actor_x11_new (window);
+#endif
 #endif
 
   if (surface_actor)

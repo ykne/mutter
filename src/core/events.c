@@ -67,24 +67,30 @@ static gboolean
 stage_has_grab (MetaDisplay *display)
 {
   ClutterStage *stage = stage_from_display (display);
-  ClutterActor *grab_actor = clutter_stage_get_grab_actor (stage);
 
-  /* Clutter falls back to an implicit grab on the stage itself when a
-   * button press isn't claimed by any reactive actor (e.g. a plain
-   * MetaWindowActor for a composited X11 client, which isn't reactive -
-   * real input routing for those goes through X, not Clutter's actor
-   * tree) - see clutter_stage_notify_action_implicit_grab() and the
-   * grab bookkeeping in clutter_stage_grab()/_unlink_grab(). That's
-   * harmless everywhere else, but under the X11 CM backend
-   * meta_backend_x11_cm_translate_device_event() spoofs every device
-   * event's window to the stage's own xwindow so Clutter's
-   * single-window-per-stage assumption still works, which is what
-   * makes button presses hit this fallback in the first place. Treating
-   * that self-grab the same as a real modal grab (an open popup menu,
-   * the overview, etc.) made get_window_for_event() and the
-   * unmodified-click handling below bail out on every single click,
-   * so exclude it here. */
-  return grab_actor != NULL && grab_actor != CLUTTER_ACTOR (stage);
+  /* This used to also exclude grab_actor == CLUTTER_ACTOR (stage), on
+   * the theory that Clutter falls back to an "implicit" grab on the
+   * stage itself when a button press isn't claimed by any reactive
+   * actor. That premise doesn't hold: ClutterStage's topmost_grab is
+   * only ever set by clutter_grab_activate(), called from
+   * clutter_stage_grab()/clutter_stage_grab_inactive() - both of which
+   * require an explicit actor argument from the caller. There is no
+   * Clutter-internal path that grabs the stage on its own.
+   *
+   * grab_actor == stage in practice means a real, deliberate whole-stage
+   * modal grab - gnome-shell's Main.pushModal(global.stage, ...) (which
+   * calls exactly clutter_stage_grab(stage, stage)) is exactly this,
+   * and it's not a rare case: the overview (overview.js), the GDM login
+   * screen (loginDialog.js), and workspace-switch animations
+   * (workspaceAnimation.js) all use it. The exclusion made
+   * get_window_for_event() and the unmodified-click handling below
+   * treat all of those as "no grab", letting clicks fall through to
+   * mutter's normal per-window focus/raise/move handling instead of
+   * being properly captured by the active modal grab - confirmed by
+   * mutter's own test harness (src/tests/meta-test-shell.c) using the
+   * identical clutter_stage_grab(stage, CLUTTER_ACTOR (stage)) pattern
+   * to simulate the overview's grab. */
+  return clutter_stage_get_grab_actor (stage) != NULL;
 }
 
 static MetaWindow *
@@ -105,18 +111,6 @@ get_window_for_event (MetaDisplay        *display,
     }
 
   window_actor = meta_window_actor_from_actor (event_actor);
-
-  if (clutter_event_type (event) == CLUTTER_BUTTON_PRESS)
-    {
-      float ex = 0, ey = 0;
-      clutter_event_get_coords (event, &ex, &ey);
-      g_message ("INSTR get_window_for_event event_actor=%p (%s) name=%s "
-                 "window_actor=%p coords=%f,%f",
-                 event_actor,
-                 event_actor ? G_OBJECT_TYPE_NAME (event_actor) : "null",
-                 event_actor ? clutter_actor_get_name (event_actor) : "null",
-                 window_actor, ex, ey);
-    }
 
   if (window_actor)
     return meta_window_actor_get_meta_window (window_actor);
@@ -187,20 +181,26 @@ meta_display_handle_event (MetaDisplay        *display,
 
   event_type = clutter_event_type (event);
 
-  if (event_type == CLUTTER_BUTTON_PRESS)
-    {
-      g_message ("INSTR handle_event enter type=BUTTON_PRESS has_grab=%d t=%"
-                 G_GINT64_FORMAT, has_grab, g_get_monotonic_time ());
-    }
-
   if (meta_display_process_captured_input (display, event))
     {
-      if (event_type == CLUTTER_BUTTON_PRESS)
+      /* A globally-keybound keycode's passive XIGrabModeSync grab
+       * freezes the keyboard device the instant X delivers the matching
+       * KEY_PRESS, regardless of which mutter code path ends up
+       * consuming it - see the THAW/REPLAY comment further down in this
+       * function (08c1b797f). A captured-input grab (e.g. a gesture or
+       * eavesdrop grab) can consume a key event before that later logic
+       * ever runs, leaving the device frozen just like the original bug
+       * this function already fixed on its normal path. THAW here is
+       * always correct (never REPLAY): we're returning STOP, keeping
+       * this event as our own. XIAllowEvents() is a no-op if this
+       * particular event didn't actually engage a SYNC freeze. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend) && IS_KEY_EVENT (event_type))
         {
-          g_message ("INSTR handle_event captured_input consumed it, "
-                     "returning early t=%" G_GINT64_FORMAT,
-                     g_get_monotonic_time ());
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
         }
+#endif
       return CLUTTER_EVENT_STOP;
     }
 
@@ -208,7 +208,19 @@ meta_display_handle_event (MetaDisplay        *display,
     {
       a11y_grabbed = meta_a11y_manager_notify_clients (a11y_manager, event);
       if (a11y_grabbed)
-        return CLUTTER_EVENT_STOP;
+        {
+          /* Same reasoning as the captured-input case above: an AT-SPI
+           * keystroke listener (e.g. Orca) can consume a globally-bound
+           * key before the THAW/REPLAY logic further down ever runs. */
+#ifdef HAVE_X11
+          if (META_IS_BACKEND_X11 (backend))
+            {
+              meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                             META_EVENT_MODE_THAW);
+            }
+#endif
+          return CLUTTER_EVENT_STOP;
+        }
     }
   else if (event_type == CLUTTER_MOTION &&
            !clutter_event_get_device_tool (event))
@@ -285,13 +297,6 @@ meta_display_handle_event (MetaDisplay        *display,
     }
 
   window = get_window_for_event (display, event, event_actor);
-
-  if (event_type == CLUTTER_BUTTON_PRESS)
-    {
-      g_message ("INSTR handle_event get_window_for_event window=%p "
-                 "stage_has_grab=%d t=%" G_GINT64_FORMAT,
-                 window, stage_has_grab (display), g_get_monotonic_time ());
-    }
 
   if (window && !window->override_redirect &&
       (event_type == CLUTTER_KEY_PRESS ||
@@ -422,21 +427,7 @@ meta_display_handle_event (MetaDisplay        *display,
     return CLUTTER_EVENT_PROPAGATE;
 
   if (stage_has_grab (display))
-    {
-      if (event_type == CLUTTER_BUTTON_PRESS)
-        {
-          g_message ("INSTR handle_event second stage_has_grab check TRUE, "
-                     "bailing before ungrabbed_event t=%" G_GINT64_FORMAT,
-                     g_get_monotonic_time ());
-        }
-      return CLUTTER_EVENT_PROPAGATE;
-    }
-
-  if (event_type == CLUTTER_BUTTON_PRESS)
-    {
-      g_message ("INSTR handle_event about to check window (window=%p) t=%"
-                 G_GINT64_FORMAT, window, g_get_monotonic_time ());
-    }
+    return CLUTTER_EVENT_PROPAGATE;
 
   if (window)
     {

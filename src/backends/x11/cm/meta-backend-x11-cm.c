@@ -463,7 +463,20 @@ meta_backend_x11_cm_get_keymap_description (MetaBackend *backend)
                                                              NULL, NULL);
       free_xkbrf_var_defs (&var_defs);
 
-      return description;
+      /* Cache this fallback description the same way set_keymap_async()
+       * caches its own, instead of handing back a fresh, never-freed
+       * object on every call: this is a (transfer none) vfunc (see
+       * meta_backend_get_keymap_description()'s doc comment) with no
+       * caller that unrefs it, so an uncached description here leaked
+       * on every call before this fix - and worse, a different pointer
+       * every time defeated the exact identity check the struct field
+       * comment above and 4437f5008 exist for, on this one code path
+       * (before the first real set_keymap_async()). Superseded the
+       * moment set_keymap_async() first runs, same as any other cached
+       * value here. */
+      x11_cm->keymap_description = description;
+
+      return x11_cm->keymap_description;
     }
 }
 

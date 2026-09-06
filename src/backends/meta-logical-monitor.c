@@ -117,8 +117,12 @@ derive_monitor_transform (MetaMonitor *monitor)
 
   main_output = meta_monitor_get_main_output (monitor);
   crtc = meta_output_get_assigned_crtc (main_output);
-  crtc_config = meta_crtc_get_config (crtc);
-  transform = crtc_config->transform;
+  /* meta_output_get_assigned_crtc() can legitimately return NULL (e.g.
+   * mid-hotplug/reconfiguration) - meta_crtc_get_config(NULL) has no
+   * internal guard, unlike the identical crtc-to-config lookup at
+   * meta-monitor.c:1331, which is guarded the same way here. */
+  crtc_config = crtc ? meta_crtc_get_config (crtc) : NULL;
+  transform = crtc_config ? crtc_config->transform : MTK_MONITOR_TRANSFORM_NORMAL;
 
   return meta_monitor_crtc_to_logical_transform (monitor, transform);
 }
