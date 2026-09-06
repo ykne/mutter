@@ -332,16 +332,6 @@ meta_display_handle_event (MetaDisplay        *display,
 
   window = get_window_for_event (display, event, event_actor);
 
-  if (event_type == CLUTTER_BUTTON_PRESS || event_type == CLUTTER_TOUCH_BEGIN)
-    {
-      g_message ("CLICKDBG get_window_for_event type=%d emulated=%d "
-                "event_actor=%p (%s) window=%s",
-                event_type, clutter_event_is_pointer_emulated (event),
-                event_actor,
-                event_actor ? G_OBJECT_TYPE_NAME (event_actor) : "null",
-                window ? window->desc : "null");
-    }
-
   if (window && !window->override_redirect &&
       (event_type == CLUTTER_KEY_PRESS ||
        event_type == CLUTTER_BUTTON_PRESS ||

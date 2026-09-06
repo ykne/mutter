@@ -3553,6 +3553,18 @@ void
 clutter_stage_maybe_lost_implicit_grab (ClutterStage  *self,
                                         ClutterSprite *sprite)
 {
+  /* sprite can legitimately be NULL here - clutter_backend_get_sprite()
+   * is documented to return NULL for an event that "does not drive" a
+   * sprite, which the X11 backend does for a genuine per-sequence touch
+   * event that isn't the device's single "pointer-emulating" touch (see
+   * the identical guard - and its full explanation - in
+   * clutter_stage_update_device_for_event()/clutter_stage_emit_event();
+   * this call site, reached from clutter_do_event() in clutter-main.c,
+   * was missing the same guard). There is no implicit grab to check for
+   * a sprite that never existed. */
+  if (!sprite)
+    return;
+
   clutter_sprite_maybe_lost_implicit_grab (sprite);
 }
 
@@ -3615,6 +3627,18 @@ clutter_stage_emit_event (ClutterStage       *self,
     focus = CLUTTER_FOCUS (clutter_backend_get_sprite (backend, self, event));
   else
     focus = CLUTTER_FOCUS (clutter_backend_get_key_focus (backend, self));
+
+  /* clutter_backend_get_sprite() is documented to return NULL for an
+   * event that "does not drive" a sprite - see the identical guard (and
+   * its full explanation) added to clutter_stage_update_device_for_event()
+   * for a genuine per-sequence touch event that isn't the device's
+   * single "pointer-emulating" touch. Confirmed live: a real two-finger
+   * pinch (GNOME Maps, real touchscreen hardware) also crashes here,
+   * via clutter_focus_propagate_event(NULL) -> CLUTTER_FOCUS_GET_CLASS(NULL),
+   * for the exact same non-primary-touch reason - there is nothing to
+   * propagate the event to in that case. */
+  if (!focus)
+    return;
 
   clutter_focus_propagate_event (focus, event);
 
@@ -3718,7 +3742,23 @@ clutter_stage_update_device_for_event (ClutterStage *stage,
       time_ms = clutter_event_get_time (event);
 
       sprite = clutter_backend_get_sprite (clutter_backend, stage, event);
-      g_assert (sprite != NULL);
+
+      /* This g_assert() was wrong, not a safety net - it looks like a
+       * guard but actually crashes (via abort()) on exactly the same
+       * legitimate NULL that the sibling branch below now handles
+       * gracefully: clutter_backend_get_sprite() is documented to
+       * return NULL for an event that "does not drive" a sprite, which
+       * the X11 backend does for a genuine per-sequence touch event
+       * that isn't the device's single "pointer-emulating" touch - and
+       * that applies just as much to that touch's own TOUCH_END/CANCEL
+       * as it does to its TOUCH_BEGIN/UPDATE. Confirmed live: a real
+       * two-finger touchscreen pinch (GNOME Maps) hit this g_assert
+       * and aborted mutter, in the same test session as (and right
+       * after fixing) the TOUCH_BEGIN/UPDATE case below - there is
+       * nothing to clean up for a sprite that was never created. */
+      if (!sprite)
+        return;
+
       clutter_sprite_update (sprite, point, NULL);
       clutter_focus_set_current_actor (CLUTTER_FOCUS (sprite), NULL,
                                        source_device, time_ms);
@@ -3739,6 +3779,25 @@ clutter_stage_update_device_for_event (ClutterStage *stage,
       time_ms = clutter_event_get_time (event);
 
       sprite = clutter_backend_get_sprite (clutter_backend, stage, event);
+
+      /* clutter_backend_get_sprite() is documented to return NULL for
+       * an event that "does not drive" a sprite - the X11 backend does
+       * exactly this for a genuine per-sequence touch event that isn't
+       * the device's single "pointer-emulating" touch (see
+       * meta_clutter_backend_x11_get_sprite()): only one touch at a
+       * time ever drives sprite/focus state, by design, so every other
+       * concurrent touch in a multi-touch gesture legitimately has no
+       * sprite to update here at all. Nothing exercised this path with
+       * more than one simultaneous touch until a real two-finger pinch
+       * on a touchscreen (GNOME Maps, real hardware) crashed mutter
+       * outright - clutter_focus_update_from_event(CLUTTER_FOCUS(NULL))
+       * dereferences the NULL through CLUTTER_FOCUS_GET_CLASS(). There
+       * is nothing to update for this event in that case - just skip
+       * both this and the pick/sprite-update call below, mirroring how
+       * the CLUTTER_TOUCH_END branch above already asserts sprite is
+       * non-NULL rather than silently tolerating it. */
+      if (!sprite)
+        return;
 
       clutter_focus_update_from_event (CLUTTER_FOCUS (sprite), event);
 
