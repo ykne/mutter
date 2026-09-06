@@ -102,6 +102,7 @@ typedef struct _ClutterStagePrivate
   float viewport[4];
 
   ClutterGrab *topmost_grab;
+  ClutterGrabState seat_grab_state;
 
   GQueue *event_queue;
 
@@ -3031,11 +3032,53 @@ clutter_stage_pick_and_update_sprite (ClutterStage             *stage,
     clutter_context_get_backend (context);
   ClutterSeat *seat =
     clutter_backend_get_default_seat (backend);
-  ClutterActor *new_actor = NULL;
+  ClutterActor *new_actor;
   MtkRegion *clear_area = NULL;
 
+  /* The "is this the shared pointer sprite, and is unfocus not inhibited"
+   * check below is an optimization: it assumes the shared pointer
+   * sprite's current_actor is already kept fresh by some other,
+   * continuous mechanism (real mouse motion naturally generates a
+   * steady stream of crossing/hover updates before any click ever
+   * happens), so a redundant pick here can be skipped.
+   *
+   * new_actor must default to the sprite's existing current_actor,
+   * not NULL: when the pick is skipped, new_actor falls straight
+   * through to the clutter_focus_set_current_actor() call below, and
+   * that call does not treat NULL as "leave current_actor alone" - it
+   * unconditionally overwrites priv->current_actor with whatever it is
+   * given, including NULL, wiping a moments-old valid actor back to
+   * NULL and synthesizing a spurious leave for it. A touchscreen tap
+   * hits this far more easily than a mouse, since a mouse's continuous
+   * motion stream keeps re-picking (and thus re-priming new_actor)
+   * anyway, while a tap "appears" already in contact with no preceding
+   * hover phase to mask the wipe. Confirmed live (real touchscreen
+   * hardware, lnvo) via targeted trace logging: current_actor flipped
+   * back to NULL on the very next skip-pick event immediately after a
+   * real pick had just set it, matching the observed "first tap opens
+   * a popup (which flips unfocus_inhibited, forcing a real pick),
+   * every tap after is ignored" symptom exactly.
+   *
+   * That fixes the mouse case, but the "continuous mechanism" the
+   * optimization assumes simply does not exist for touch at all - a
+   * tap has no preceding hover/motion phase of its own on the shared
+   * pointer sprite, so whatever current_actor happens to hold (stale
+   * from the last real mouse position, or from an unrelated earlier
+   * touch) is not "fresh", it is just whatever was last picked for a
+   * different point. Confirmed live: a tap was dispatched to a stale
+   * current_actor left over from session startup, while an
+   * independent pick at the same coordinates found a different actor
+   * entirely. Callers pass CLUTTER_DEVICE_UPDATE_IGNORE_CACHE
+   * specifically to say "do not trust cached sprite state here"
+   * (clutter_stage_update_device_for_event() sets it for touchscreen-
+   * sourced updates); honor that at this outer level too, not just
+   * for the inner clear-area cache below. */
+  new_actor = clutter_focus_get_current_actor (CLUTTER_FOCUS (sprite));
+
   if (sprite != clutter_backend_get_pointer_sprite (backend, stage) ||
-      clutter_seat_is_unfocus_inhibited (seat))
+      clutter_seat_is_unfocus_inhibited (seat) ||
+      (flags & CLUTTER_DEVICE_UPDATE_IGNORE_CACHE) ||
+      !new_actor)
     {
       if ((flags & CLUTTER_DEVICE_UPDATE_IGNORE_CACHE) == 0)
         {
@@ -3138,6 +3181,7 @@ static void
 clutter_stage_sync_seat_grab (ClutterStage *stage,
                               gboolean      grabbed)
 {
+  ClutterStagePrivate *priv = clutter_stage_get_instance_private (stage);
   ClutterContext *context;
   ClutterBackend *backend;
   ClutterSeat *seat;
@@ -3147,9 +3191,22 @@ clutter_stage_sync_seat_grab (ClutterStage *stage,
   seat = clutter_backend_get_default_seat (backend);
 
   if (grabbed)
-    clutter_seat_grab (seat, clutter_get_current_event_time ());
+    {
+      /* meta_seat_x11_grab() (the X11 backend's grab vfunc) can
+       * genuinely return a state missing CLUTTER_GRAB_STATE_POINTER or
+       * _KEYBOARD when the underlying XIGrabDevice() call fails (e.g.
+       * AlreadyGrabbed, because another client such as an open GTK menu
+       * already holds an active grab) - capture the real result here so
+       * clutter_grab_get_seat_state() can report it, instead of the
+       * hardcoded CLUTTER_GRAB_STATE_ALL it used to unconditionally
+       * return. */
+      priv->seat_grab_state = clutter_seat_grab (seat, clutter_get_current_event_time ());
+    }
   else
-    clutter_seat_ungrab (seat, clutter_get_current_event_time ());
+    {
+      clutter_seat_ungrab (seat, clutter_get_current_event_time ());
+      priv->seat_grab_state = CLUTTER_GRAB_STATE_NONE;
+    }
 }
 
 /**
@@ -3366,18 +3423,25 @@ clutter_grab_dismiss (ClutterGrab *grab)
 ClutterGrabState
 clutter_grab_get_seat_state (ClutterGrab *grab)
 {
+  ClutterStagePrivate *priv;
+
   g_return_val_if_fail (grab != NULL, CLUTTER_GRAB_STATE_NONE);
 
-  /* clutter_stage_sync_seat_grab() now calls clutter_seat_grab() (see
+  /* clutter_stage_sync_seat_grab() calls clutter_seat_grab() (see
    * MetaSeatX11's grab_state field/meta_seat_x11_grab()) whenever the
    * stage's aggregate is-grabbed state goes false->true, and grabs
-   * every device together, so any active ClutterGrab does hold
-   * everything it asked for. What's still missing is real per-grab
+   * every device together - but that windowing-level grab can itself
+   * partially fail (e.g. XIGrabDevice() returning AlreadyGrabbed
+   * because another client, such as an open GTK menu, already holds an
+   * active grab), so "an active ClutterGrab exists" doesn't guarantee
+   * it holds everything it asked for. Report the real captured result
+   * instead of assuming success. What's still missing is real per-grab
    * tracking (e.g. a grab created while another is already active
    * doesn't get its own windowing-level state distinct from the
    * stage's), so this stays a stage-wide approximation rather than a
    * true per-grab value. */
-  return CLUTTER_GRAB_STATE_ALL;
+  priv = clutter_stage_get_instance_private (grab->stage);
+  return priv->seat_grab_state;
 }
 
 /**
@@ -3489,6 +3553,18 @@ void
 clutter_stage_maybe_lost_implicit_grab (ClutterStage  *self,
                                         ClutterSprite *sprite)
 {
+  /* sprite can legitimately be NULL here - clutter_backend_get_sprite()
+   * is documented to return NULL for an event that "does not drive" a
+   * sprite, which the X11 backend does for a genuine per-sequence touch
+   * event that isn't the device's single "pointer-emulating" touch (see
+   * the identical guard - and its full explanation - in
+   * clutter_stage_update_device_for_event()/clutter_stage_emit_event();
+   * this call site, reached from clutter_do_event() in clutter-main.c,
+   * was missing the same guard). There is no implicit grab to check for
+   * a sprite that never existed. */
+  if (!sprite)
+    return;
+
   clutter_sprite_maybe_lost_implicit_grab (sprite);
 }
 
@@ -3551,6 +3627,18 @@ clutter_stage_emit_event (ClutterStage       *self,
     focus = CLUTTER_FOCUS (clutter_backend_get_sprite (backend, self, event));
   else
     focus = CLUTTER_FOCUS (clutter_backend_get_key_focus (backend, self));
+
+  /* clutter_backend_get_sprite() is documented to return NULL for an
+   * event that "does not drive" a sprite - see the identical guard (and
+   * its full explanation) added to clutter_stage_update_device_for_event()
+   * for a genuine per-sequence touch event that isn't the device's
+   * single "pointer-emulating" touch. Confirmed live: a real two-finger
+   * pinch (GNOME Maps, real touchscreen hardware) also crashes here,
+   * via clutter_focus_propagate_event(NULL) -> CLUTTER_FOCUS_GET_CLASS(NULL),
+   * for the exact same non-primary-touch reason - there is nothing to
+   * propagate the event to in that case. */
+  if (!focus)
+    return;
 
   clutter_focus_propagate_event (focus, event);
 
@@ -3654,7 +3742,23 @@ clutter_stage_update_device_for_event (ClutterStage *stage,
       time_ms = clutter_event_get_time (event);
 
       sprite = clutter_backend_get_sprite (clutter_backend, stage, event);
-      g_assert (sprite != NULL);
+
+      /* This g_assert() was wrong, not a safety net - it looks like a
+       * guard but actually crashes (via abort()) on exactly the same
+       * legitimate NULL that the sibling branch below now handles
+       * gracefully: clutter_backend_get_sprite() is documented to
+       * return NULL for an event that "does not drive" a sprite, which
+       * the X11 backend does for a genuine per-sequence touch event
+       * that isn't the device's single "pointer-emulating" touch - and
+       * that applies just as much to that touch's own TOUCH_END/CANCEL
+       * as it does to its TOUCH_BEGIN/UPDATE. Confirmed live: a real
+       * two-finger touchscreen pinch (GNOME Maps) hit this g_assert
+       * and aborted mutter, in the same test session as (and right
+       * after fixing) the TOUCH_BEGIN/UPDATE case below - there is
+       * nothing to clean up for a sprite that was never created. */
+      if (!sprite)
+        return;
+
       clutter_sprite_update (sprite, point, NULL);
       clutter_focus_set_current_actor (CLUTTER_FOCUS (sprite), NULL,
                                        source_device, time_ms);
@@ -3676,12 +3780,40 @@ clutter_stage_update_device_for_event (ClutterStage *stage,
 
       sprite = clutter_backend_get_sprite (clutter_backend, stage, event);
 
+      /* clutter_backend_get_sprite() is documented to return NULL for
+       * an event that "does not drive" a sprite - the X11 backend does
+       * exactly this for a genuine per-sequence touch event that isn't
+       * the device's single "pointer-emulating" touch (see
+       * meta_clutter_backend_x11_get_sprite()): only one touch at a
+       * time ever drives sprite/focus state, by design, so every other
+       * concurrent touch in a multi-touch gesture legitimately has no
+       * sprite to update here at all. Nothing exercised this path with
+       * more than one simultaneous touch until a real two-finger pinch
+       * on a touchscreen (GNOME Maps, real hardware) crashed mutter
+       * outright - clutter_focus_update_from_event(CLUTTER_FOCUS(NULL))
+       * dereferences the NULL through CLUTTER_FOCUS_GET_CLASS(). There
+       * is nothing to update for this event in that case - just skip
+       * both this and the pick/sprite-update call below, mirroring how
+       * the CLUTTER_TOUCH_END branch above already asserts sprite is
+       * non-NULL rather than silently tolerating it. */
+      if (!sprite)
+        return;
+
       clutter_focus_update_from_event (CLUTTER_FOCUS (sprite), event);
 
+      /* A touchscreen tap has no preceding hover/motion phase of its
+       * own on the shared pointer sprite, unlike a real mouse - so
+       * whatever current_actor that sprite already holds cannot be
+       * trusted as "fresh" for a touch-sourced update. Force a real
+       * pick every time by passing IGNORE_CACHE, matching how the
+       * native/Wayland backend sidesteps this entirely by giving touch
+       * its own dedicated sprite instead of sharing the pointer's. */
       clutter_stage_pick_and_update_sprite (stage,
                                             sprite,
                                             source_device,
-                                            CLUTTER_DEVICE_UPDATE_NONE,
+                                            device_type == CLUTTER_TOUCHSCREEN_DEVICE
+                                              ? CLUTTER_DEVICE_UPDATE_IGNORE_CACHE
+                                              : CLUTTER_DEVICE_UPDATE_NONE,
                                             point,
                                             time_ms);
     }

@@ -1853,9 +1853,25 @@ window_has_buffer (MetaWindow *window)
    * distinct from the window simply being mapped and damage-tracked -
    * content is implicitly present once that's true, which
    * init_surface_actor() (meta-window-actor.c) already guarantees by
-   * the time this is ever checked. */
+   * the time this is ever checked.
+   *
+   * client_type == X11 alone doesn't distinguish a plain X11-CM window
+   * from a MetaWindowXwayland instance under a real Wayland+Xwayland
+   * session: both share it via MetaWindowX11's constructed() vfunc,
+   * which MetaWindowXwayland doesn't override (genuine upstream
+   * design, not specific to this fork). An Xwayland window still needs
+   * its own wl_surface to actually have content - unlike a plain X11
+   * window, it doesn't get that implicitly just from being mapped -
+   * so exclude it here and let it fall through to the same
+   * surface/buffer check a native Wayland window gets below. */
+#ifdef HAVE_XWAYLAND
+  if (window->client_type == META_WINDOW_CLIENT_TYPE_X11 &&
+      !META_IS_WINDOW_XWAYLAND (window))
+    return TRUE;
+#else
   if (window->client_type == META_WINDOW_CLIENT_TYPE_X11)
     return TRUE;
+#endif
 
   {
     MetaWaylandSurface *surface = meta_window_get_wayland_surface (window);
@@ -7741,8 +7757,38 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
       event_type != CLUTTER_TOUCH_BEGIN)
     return CLUTTER_EVENT_PROPAGATE;
 
-  g_message ("INSTR ungrabbed_event enter window=%p t=%" G_GINT64_FORMAT,
-             window, g_get_monotonic_time ());
+  /* A touchscreen tap/drag on this window generates BOTH a real
+   * CLUTTER_TOUCH_BEGIN for the touch sequence itself AND (once
+   * meta_backend_finish_touch_sequence() accepts touch ownership - see
+   * meta-seat-x11.c) a synthetic pointer-emulated CLUTTER_BUTTON_PRESS
+   * for the exact same physical gesture, delivered as its own separate
+   * event. The mechanism to correlate/ignore the emulated shadow event
+   * (meta_seat_x11_get_pointer_emulating_sequence(),
+   * clutter_event_is_pointer_emulated()) exists but was never consulted
+   * here, so both events independently reached this function and could
+   * each start their own interactive move grab op for what the user
+   * experiences as a single drag. Confirmed live (real hardware,
+   * touchscreen): dragging a window by its titlebar via touch didn't
+   * work, and real mouse clicks stopped working afterward until
+   * something (e.g. toggling the overview) forced a THAW - the second,
+   * conflicting begin_grab_op() attempt left its own passive-grab THAW
+   * never reached. Ignore the emulated shadow here - the real touch
+   * event already does everything this function would - but still THAW
+   * the passive click-to-focus SYNC grab this specific button event
+   * engaged, the same as the window->unmanaging/override_redirect cases
+   * below already do, or it leaks exactly the same way. */
+  if (event_type == CLUTTER_BUTTON_PRESS &&
+      clutter_event_is_pointer_emulated (event))
+    {
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
+      return CLUTTER_EVENT_PROPAGATE;
+    }
 
   if (window->unmanaging)
     {
@@ -7780,7 +7826,21 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
    * we have to take special care not to act for an override-redirect window.
    */
   if (window->override_redirect)
-    return CLUTTER_EVENT_PROPAGATE;
+    {
+      /* This event arrived through the passive click-to-focus SYNC grab
+       * (see the window->unmanaging comment above) even though this
+       * window doesn't participate in click-to-focus - thaw it here
+       * too, or the pointer (and, for a combined grab, the keyboard)
+       * freezes for the rest of the session exactly like that case. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
+      return CLUTTER_EVENT_PROPAGATE;
+    }
 
   /* Don't focus panels--they must explicitly request focus.
    * See bug 160470
@@ -7850,12 +7910,8 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
 #ifdef HAVE_X11
       if (META_IS_BACKEND_X11 (backend))
         {
-          g_message ("INSTR pre-allow_events t=%" G_GINT64_FORMAT,
-                     g_get_monotonic_time ());
           meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
                                          META_EVENT_MODE_REPLAY);
-          g_message ("INSTR post-allow_events t=%" G_GINT64_FORMAT,
-                     g_get_monotonic_time ());
         }
 #endif
     }
@@ -7892,7 +7948,22 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
                                              sprite,
                                              time_ms,
                                              NULL))
-                return CLUTTER_EVENT_STOP;
+                {
+                  /* Thaw the passive click-to-focus SYNC grab before
+                   * handing off to the interactive resize op - the
+                   * device stays frozen (no motion/release events
+                   * delivered to anyone) until this runs, which would
+                   * otherwise stall the resize itself, not just leak
+                   * the grab afterward. */
+#ifdef HAVE_X11
+                  if (META_IS_BACKEND_X11 (backend))
+                    {
+                      meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                                     META_EVENT_MODE_THAW);
+                    }
+#endif
+                  return CLUTTER_EVENT_STOP;
+                }
             }
         }
     }
@@ -7905,6 +7976,17 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
                              META_WINDOW_MENU_WM,
                              (int) x, (int) y);
 
+      /* Thaw the passive click-to-focus SYNC grab - mutter is fully
+       * done with this click (showing the window menu, not forwarding
+       * to the client), so release the device the same way the
+       * unmodified-click path below does. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
       return CLUTTER_EVENT_STOP;
     }
   else if (is_window_grab && (int) button == 1)
@@ -7917,12 +7999,41 @@ meta_window_handle_ungrabbed_event (MetaWindow         *window,
                                          sprite,
                                          time_ms,
                                          NULL))
-            return CLUTTER_EVENT_STOP;
+            {
+              /* Same reasoning as the resize-op case above: the device
+               * must be thawed for the interactive move op's own
+               * subsequent motion/release events to be delivered at
+               * all. */
+#ifdef HAVE_X11
+              if (META_IS_BACKEND_X11 (backend))
+                {
+                  meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                                 META_EVENT_MODE_THAW);
+                }
+#endif
+              return CLUTTER_EVENT_STOP;
+            }
         }
     }
 
-  g_message ("INSTR ungrabbed_event exit t=%" G_GINT64_FORMAT,
-             g_get_monotonic_time ());
+  /* Any path reaching here without already returning did not REPLAY the
+   * click to the client (the unmodified-click branch above already did
+   * that) - thaw the passive click-to-focus SYNC grab so a click mutter
+   * itself doesn't otherwise handle (an unmatched button, a resize/move
+   * op that failed to start, or a resize click that computed no
+   * direction) doesn't leave the device frozen for the rest of the
+   * session. */
+  if (!unmodified)
+    {
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
+    }
+
   return CLUTTER_EVENT_PROPAGATE;
 }
 

@@ -1319,11 +1319,6 @@ handle_other_xevent (MetaX11Display *x11_display,
        * text-entry I-beam, etc.) never reaches the renderer at all -
        * this is the root cause of project_edge_resize_broken.md's
        * long-standing "cursor never visually changes shape" bug. */
-      MetaBackend *backend =
-        meta_context_get_backend (meta_display_get_context (display));
-      MetaCursorTracker *cursor_tracker =
-        meta_backend_get_cursor_tracker (backend);
-
       /* This MetaX11Display (and its XFixesCursorNotify events) exists
        * even under a Wayland session, to manage Xwayland-connected X11
        * clients - but meta_backend_get_cursor_tracker() there returns a
@@ -1331,10 +1326,21 @@ handle_other_xevent (MetaX11Display *x11_display,
        * unguarded cast below crashed (SIGSEGV in g_object_unref, via a
        * garbage field read through the wrong struct layout) the first
        * time an XFixesCursorNotify arrived in a live Wayland+Xwayland
-       * session - only ever exercised against the X11-CM backend before. */
+       * session - only ever exercised against the X11-CM backend before.
+       * Under have_x11=false builds, MetaCursorTrackerX11 doesn't exist
+       * at all (meta-cursor-tracker-x11.c is gated by plain have_x11,
+       * not have_x11_client, in src/meson.build), so this whole block is
+       * compiled out rather than just runtime-guarded. */
+#ifdef HAVE_X11
+      MetaBackend *backend =
+        meta_context_get_backend (meta_display_get_context (display));
+      MetaCursorTracker *cursor_tracker =
+        meta_backend_get_cursor_tracker (backend);
+
       if (META_IS_CURSOR_TRACKER_X11 (cursor_tracker))
         meta_cursor_tracker_x11_handle_xevent (META_CURSOR_TRACKER_X11 (cursor_tracker),
                                                event);
+#endif
       return;
     }
 
@@ -1945,11 +1951,13 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
    * needing a repaint after the stage's own initial expose) never
    * actually appeared on screen. See meta_compositor_x11_process_xevent()'s
    * own handling of XDamageNotify. */
+#ifdef HAVE_X11
   if (!bypass_compositor && META_IS_COMPOSITOR_X11 (display->compositor))
     {
       meta_compositor_x11_process_xevent (META_COMPOSITOR_X11 (display->compositor),
                                           event, NULL);
     }
+#endif
 
  out:
 

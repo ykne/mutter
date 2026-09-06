@@ -2544,18 +2544,55 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
                                              xev->root_x,
                                              xev->root_y);
 
-            /* Nothing currently claims X11 touch-sequence ownership to
-             * reject a sequence (gnome-shell's touch-gesture recognition
-             * runs on already-delivered events via Clutter's gesture-action
-             * framework, not via the old X11-specific ownership gate) - so
-             * always accept immediately, otherwise the X server never
-             * finalizes/delivers the pointer-emulated ButtonPress/Release
-             * for this sequence and a tap silently never turns into a
-             * click, even though TouchBegin/Update (hence pointer motion)
-             * are still delivered unconditionally either way. */
+            /* gnome-shell's own chrome (panel, overview, dash, popup
+             * menus, on-screen keyboard) is entirely Clutter actors
+             * painted inside mutter's single compositing/stage window -
+             * it has no X11 windows of its own, so a touch landing on it
+             * reports no window *distinct from the event window itself*
+             * beneath the stage (xev->child is None, or - confirmed live,
+             * see below - sometimes the stage's own window ID rather than
+             * None; either way it is never a genuinely different XID). A
+             * real client window (Firefox, any other app) is a separate
+             * X11 window - X reports it as that distinct child.
+             *
+             * Accepting unconditionally here (as this used to do) claims
+             * exclusive ownership of every touch for mutter itself, which
+             * is correct and necessary for the shell-chrome case (nothing
+             * else could otherwise turn a tap on shell's own UI into a
+             * click - see the pointer-emulation comment below), but
+             * starves any real client window that itself selects for raw
+             * XI2 touch of the event entirely: once mutter accepts, X
+             * never delivers the touch to the client, and unlike a
+             * button grab there is no "replay" for touch ownership to
+             * fall back on - REPLAY is a button/key-grab concept with no
+             * analog in the X11 touch protocol. Confirmed live (real
+             * touchscreen hardware, lnvo): a tap that squarely landed on
+             * Firefox's own content window generated a genuine
+             * XI_TouchBegin/XI_TouchEnd pair with zero pointer-emulated
+             * ButtonPress/Release companion at all (unlike the identical
+             * gesture over shell's own dash, which produced exactly that
+             * companion pair with no raw touch) - Firefox never has a
+             * chance to see the touch once mutter has already claimed it.
+             * Reject instead whenever a real, distinct child window is
+             * present, so X delivers the touch straight to that client.
+             *
+             * xev->child == xev->event (not just None) must still count
+             * as "no distinct child" - confirmed live this is a real,
+             * reachable case (a tap on the on-screen keyboard's own
+             * StButton reported child == event, both the stage's own
+             * window), not just a defensive/theoretical one: comparing
+             * only against None wrongly rejected it, and since there is
+             * no other window to actually deliver to, X kept re-routing
+             * the same touch back to mutter as a fresh sequence - visible
+             * live as a rapid, repeating TouchBegin/Update/End loop on
+             * the same touch ID instead of one clean pair, and the
+             * on-screen keyboard simply never responding to taps. */
             meta_backend_finish_touch_sequence (meta_seat_x11_get_backend (seat),
                                                 sequence,
-                                                META_SEQUENCE_ACCEPTED);
+                                                (xev->child == None ||
+                                                 xev->child == xev->event) ?
+                                                META_SEQUENCE_ACCEPTED :
+                                                META_SEQUENCE_REJECTED);
 
             if (xev->flags & XITouchEmulatingPointer)
               seat->pointer_emulating_sequence = sequence;
