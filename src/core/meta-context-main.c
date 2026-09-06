@@ -276,6 +276,21 @@ meta_context_main_create_backend (MetaContext  *context,
 {
   MetaContextMain *context_main = META_CONTEXT_MAIN (context);
 
+  /* An explicit --headless/--devkit flag must win over the ambient
+   * XDG_SESSION_TYPE env var below, not the other way around - a
+   * terminal launching `mutter --headless`/`--devkit` (the standard
+   * dev/test/CI invocation, and how gnome-remote-desktop's headless
+   * launcher starts mutter) inherits XDG_SESSION_TYPE=x11 from any
+   * X11 session it happens to run inside, which used to make the env
+   * check below fire first and construct a real MetaBackendX11Cm
+   * against that live $DISPLAY instead of the requested headless
+   * backend. */
+#ifdef HAVE_NATIVE_BACKEND
+  if (context_main->options.headless ||
+      context_main->options.devkit)
+    return create_headless_backend (context, error);
+#endif
+
   /* This entry point never grew an X11 case of its own when the X11
    * backend was restored - MetaBackendX11Cm existed and worked (see the
    * winsys/cursor ports elsewhere in this tree) but nothing ever
@@ -297,10 +312,6 @@ meta_context_main_create_backend (MetaContext  *context,
 #endif
 
 #ifdef HAVE_NATIVE_BACKEND
-  if (context_main->options.headless ||
-      context_main->options.devkit)
-    return create_headless_backend (context, error);
-
   return create_native_backend (context, error);
 #endif /* HAVE_NATIVE_BACKEND */
 

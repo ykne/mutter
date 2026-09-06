@@ -1689,14 +1689,18 @@ meta_x11_display_reload_cursor (MetaX11Display *x11_display)
 #ifdef HAVE_X11
   {
     MetaBackend *backend = backend_from_x11_display (x11_display);
+    MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
 
-    if (META_IS_BACKEND_X11 (backend))
-      {
-        MetaCursorTracker *cursor_tracker =
-          meta_backend_get_cursor_tracker (backend);
-
-        meta_cursor_tracker_x11_invalidate_cursor (META_CURSOR_TRACKER_X11 (cursor_tracker));
-      }
+    /* Guard on the cursor tracker's own type, not the backend's - a
+     * nested X11 backend (MetaBackendX11Nested) satisfies
+     * META_IS_BACKEND_X11() too (it's a subclass) but never overrides
+     * create_cursor_tracker(), so it inherits the base MetaBackend's
+     * plain (non-X11) cursor tracker. The sibling call site in
+     * src/x11/events.c (handle_other_xevent()'s XFixesCursorNotify
+     * handling) already guards on META_IS_CURSOR_TRACKER_X11() for
+     * exactly this reason - match it here. */
+    if (META_IS_CURSOR_TRACKER_X11 (cursor_tracker))
+      meta_cursor_tracker_x11_invalidate_cursor (META_CURSOR_TRACKER_X11 (cursor_tracker));
   }
 #endif
 
@@ -1957,25 +1961,30 @@ create_guard_window (MetaX11Display *x11_display)
   /* https://bugzilla.gnome.org/show_bug.cgi?id=710346 */
   XStoreName (x11_display->xdisplay, guard_window, "mutter guard window");
 
-  if (!meta_is_wayland_compositor ())
-    {
-      MetaBackendX11 *backend =
-        META_BACKEND_X11 (backend_from_x11_display (x11_display));
-      Display *backend_xdisplay = meta_backend_x11_get_xdisplay (backend);
-      unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
-      XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
+#ifdef HAVE_X11
+  {
+    MetaBackend *backend = backend_from_x11_display (x11_display);
 
-      XISetMask (mask.mask, XI_ButtonPress);
-      XISetMask (mask.mask, XI_ButtonRelease);
-      XISetMask (mask.mask, XI_Motion);
+    if (META_IS_BACKEND_X11 (backend))
+      {
+        MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
+        Display *backend_xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
+        unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+        XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
 
-      /* Sync on the connection we created the window on to
-       * make sure it's created before we select on it on the
-       * backend connection. */
-      XSync (x11_display->xdisplay, False);
+        XISetMask (mask.mask, XI_ButtonPress);
+        XISetMask (mask.mask, XI_ButtonRelease);
+        XISetMask (mask.mask, XI_Motion);
 
-      XISelectEvents (backend_xdisplay, guard_window, &mask, 1);
-    }
+        /* Sync on the connection we created the window on to
+         * make sure it's created before we select on it on the
+         * backend connection. */
+        XSync (x11_display->xdisplay, False);
+
+        XISelectEvents (backend_xdisplay, guard_window, &mask, 1);
+      }
+  }
+#endif
 
   meta_stack_tracker_record_add (x11_display->display->stack_tracker,
                                  guard_window,
@@ -2033,13 +2042,28 @@ meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
                                          XRectangle      *rects,
                                          int              n_rects)
 {
+  /* An MetaX11Display exists both under the X11 CM backend and under
+   * the native/Wayland backend (servicing Xwayland-connected clients),
+   * since this file compiles whenever have_x11_client is true - but
+   * the stage/overlay-window input-shaping this function does is only
+   * meaningful for mutter's own X11 CM compositor (meta-compositor-x11.c
+   * is its only internal caller). gnome-shell's ShellGlobal also calls
+   * this META_EXPORT function directly (see the comment on its
+   * declaration in meta-x11-display-private.h), guarded only by
+   * #ifdef HAVE_X11 and an x11_display != NULL check - neither of which
+   * rules out a real Wayland+Xwayland session, where backend is
+   * MetaBackendNative and META_BACKEND_X11() would be an invalid cast -
+   * so this is a no-op outside the X11 CM backend, not just outside
+   * HAVE_X11 builds. */
+#ifdef HAVE_X11
   MetaBackend *backend = backend_from_x11_display (x11_display);
-  Window stage_xwindow = meta_backend_x11_get_xwindow (META_BACKEND_X11 (backend));
+  Window stage_xwindow;
   XserverRegion region;
 
-  g_message ("INSTR set_stage_input_region n_rects=%d stage_xwindow=0x%lx "
-            "overlay=0x%lx", n_rects, (unsigned long) stage_xwindow,
-            (unsigned long) x11_display->composite_overlay_window);
+  if (!META_IS_BACKEND_X11 (backend))
+    return;
+
+  stage_xwindow = meta_backend_x11_get_xwindow (META_BACKEND_X11 (backend));
 
   region = XFixesCreateRegion (x11_display->xdisplay, rects, n_rects);
   XFixesSetWindowShapeRegion (x11_display->xdisplay,
@@ -2054,6 +2078,7 @@ meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
                          x11_display->stage_input_region);
 
   x11_display->stage_input_region = region;
+#endif
 }
 
 static void
