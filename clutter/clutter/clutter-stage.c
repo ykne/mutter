@@ -3032,11 +3032,53 @@ clutter_stage_pick_and_update_sprite (ClutterStage             *stage,
     clutter_context_get_backend (context);
   ClutterSeat *seat =
     clutter_backend_get_default_seat (backend);
-  ClutterActor *new_actor = NULL;
+  ClutterActor *new_actor;
   MtkRegion *clear_area = NULL;
 
+  /* The "is this the shared pointer sprite, and is unfocus not inhibited"
+   * check below is an optimization: it assumes the shared pointer
+   * sprite's current_actor is already kept fresh by some other,
+   * continuous mechanism (real mouse motion naturally generates a
+   * steady stream of crossing/hover updates before any click ever
+   * happens), so a redundant pick here can be skipped.
+   *
+   * new_actor must default to the sprite's existing current_actor,
+   * not NULL: when the pick is skipped, new_actor falls straight
+   * through to the clutter_focus_set_current_actor() call below, and
+   * that call does not treat NULL as "leave current_actor alone" - it
+   * unconditionally overwrites priv->current_actor with whatever it is
+   * given, including NULL, wiping a moments-old valid actor back to
+   * NULL and synthesizing a spurious leave for it. A touchscreen tap
+   * hits this far more easily than a mouse, since a mouse's continuous
+   * motion stream keeps re-picking (and thus re-priming new_actor)
+   * anyway, while a tap "appears" already in contact with no preceding
+   * hover phase to mask the wipe. Confirmed live (real touchscreen
+   * hardware, lnvo) via targeted trace logging: current_actor flipped
+   * back to NULL on the very next skip-pick event immediately after a
+   * real pick had just set it, matching the observed "first tap opens
+   * a popup (which flips unfocus_inhibited, forcing a real pick),
+   * every tap after is ignored" symptom exactly.
+   *
+   * That fixes the mouse case, but the "continuous mechanism" the
+   * optimization assumes simply does not exist for touch at all - a
+   * tap has no preceding hover/motion phase of its own on the shared
+   * pointer sprite, so whatever current_actor happens to hold (stale
+   * from the last real mouse position, or from an unrelated earlier
+   * touch) is not "fresh", it is just whatever was last picked for a
+   * different point. Confirmed live: a tap was dispatched to a stale
+   * current_actor left over from session startup, while an
+   * independent pick at the same coordinates found a different actor
+   * entirely. Callers pass CLUTTER_DEVICE_UPDATE_IGNORE_CACHE
+   * specifically to say "do not trust cached sprite state here"
+   * (clutter_stage_update_device_for_event() sets it for touchscreen-
+   * sourced updates); honor that at this outer level too, not just
+   * for the inner clear-area cache below. */
+  new_actor = clutter_focus_get_current_actor (CLUTTER_FOCUS (sprite));
+
   if (sprite != clutter_backend_get_pointer_sprite (backend, stage) ||
-      clutter_seat_is_unfocus_inhibited (seat))
+      clutter_seat_is_unfocus_inhibited (seat) ||
+      (flags & CLUTTER_DEVICE_UPDATE_IGNORE_CACHE) ||
+      !new_actor)
     {
       if ((flags & CLUTTER_DEVICE_UPDATE_IGNORE_CACHE) == 0)
         {
@@ -3700,10 +3742,19 @@ clutter_stage_update_device_for_event (ClutterStage *stage,
 
       clutter_focus_update_from_event (CLUTTER_FOCUS (sprite), event);
 
+      /* A touchscreen tap has no preceding hover/motion phase of its
+       * own on the shared pointer sprite, unlike a real mouse - so
+       * whatever current_actor that sprite already holds cannot be
+       * trusted as "fresh" for a touch-sourced update. Force a real
+       * pick every time by passing IGNORE_CACHE, matching how the
+       * native/Wayland backend sidesteps this entirely by giving touch
+       * its own dedicated sprite instead of sharing the pointer's. */
       clutter_stage_pick_and_update_sprite (stage,
                                             sprite,
                                             source_device,
-                                            CLUTTER_DEVICE_UPDATE_NONE,
+                                            device_type == CLUTTER_TOUCHSCREEN_DEVICE
+                                              ? CLUTTER_DEVICE_UPDATE_IGNORE_CACHE
+                                              : CLUTTER_DEVICE_UPDATE_NONE,
                                             point,
                                             time_ms);
     }
