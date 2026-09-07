@@ -310,11 +310,11 @@ clutter_key_focus_notify_grab (ClutterFocus *focus,
   focus_in_grab =
     !grab_actor ||
     grab_actor == focus_actor ||
-    clutter_actor_contains (grab_actor, focus_actor);
+    (focus_actor && clutter_actor_contains (grab_actor, focus_actor));
   focus_in_old_grab =
     !old_grab_actor ||
     old_grab_actor == focus_actor ||
-    clutter_actor_contains (old_grab_actor, focus_actor);
+    (focus_actor && clutter_actor_contains (old_grab_actor, focus_actor));
 
   if (focus_in_grab && !focus_in_old_grab)
     _clutter_actor_set_has_key_focus (focus_actor, TRUE);
