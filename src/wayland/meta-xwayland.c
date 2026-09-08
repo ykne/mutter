@@ -496,7 +496,26 @@ x_io_error_exit (Display *display,
     }
   else
     {
+      MetaDisplay *meta_display = meta_context_get_display (context);
+
       meta_topic (META_DEBUG_WAYLAND, "Xwayland disappeared");
+
+      /* Unlike the deliberate-restart path (meta_xwayland_terminate()),
+       * an unexpected connection loss - e.g. XWayland tearing down mid
+       * logout - left display->x11_display non-NULL with its underlying
+       * Xlib connection already dead. Any already-armed X11-dependent
+       * callback (e.g. the sloppy-focus timer in
+       * focus_on_pointer_rest_callback(), via
+       * meta_display_get_current_time_roundtrip()) would then block
+       * forever on a blocking round-trip against that dead connection,
+       * hanging session shutdown until systemd's stop-timeout SIGABRTs
+       * the process. Shut it down here too so display->x11_display
+       * becomes NULL immediately, matching the deliberate-stop path, so
+       * such callbacks take their existing "no X11 display" fallback
+       * instead of touching the dead connection.
+       */
+      if (meta_display)
+        meta_display_shutdown_x11 (meta_display);
     }
 }
 
