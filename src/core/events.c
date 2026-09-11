@@ -41,6 +41,7 @@
 
 #ifdef HAVE_X11
 #include "backends/x11/meta-backend-x11.h"
+#include "x11/window-x11.h"
 #endif
 
 #define IS_KEY_EVENT(et) ((et) == CLUTTER_KEY_PRESS || \
@@ -54,6 +55,51 @@ stage_from_display (MetaDisplay *display)
 
   return CLUTTER_STAGE (meta_backend_get_stage (backend));
 }
+
+#ifdef HAVE_X11
+/* FIX (sloppy-focus-lost-after-resize-50.4 investigation, round 9/14):
+ * the two earlier fix attempts (meta_window_x11_grab_op_ended()'s
+ * re-select and meta_window_focus()'s re-select) both re-issue the
+ * per-window XI2 Enter/Leave/FocusIn/FocusOut selection at assumed-safe
+ * checkpoints, but a live repro found both firing successfully moments
+ * before a crossing that then failed the exact same way - the loss
+ * isn't reliably tied to one fixed point, it can recur from the
+ * crossing/transition itself. Rather than guess more checkpoints, react
+ * directly to the symptom: a real LEAVE with no matching ENTER arriving
+ * shortly after is exactly the shape of what happens right before hover
+ * gets stuck (the window being left drops off the selection, and
+ * whatever should have been entered next never generates its own
+ * event). One MetaDisplay per process, so file-static state is enough -
+ * no need to thread this through MetaDisplayPrivate. */
+static guint orphaned_leave_timeout_id = 0;
+
+static gboolean
+on_orphaned_leave_timeout (gpointer user_data)
+{
+  MetaDisplay *display = user_data;
+
+  orphaned_leave_timeout_id = 0;
+  g_message ("INSTR events.c: orphaned LEAVE (no ENTER followed) - "
+            "reactively re-selecting XI2 events on all managed windows");
+  meta_window_x11_reselect_all_managed_window_events (display);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+cancel_orphaned_leave_timeout (void)
+{
+  g_clear_handle_id (&orphaned_leave_timeout_id, g_source_remove);
+}
+
+static void
+arm_orphaned_leave_timeout (MetaDisplay *display)
+{
+  cancel_orphaned_leave_timeout ();
+  orphaned_leave_timeout_id =
+    g_timeout_add (150, on_orphaned_leave_timeout, display);
+}
+#endif
 
 static gboolean
 stage_has_key_focus (MetaDisplay *display)
@@ -266,6 +312,11 @@ meta_display_handle_event (MetaDisplay        *display,
         {
           MetaWindow *enter_window;
           graphene_point_t pos;
+
+          if (event_type == CLUTTER_LEAVE)
+            arm_orphaned_leave_timeout (display);
+          else
+            cancel_orphaned_leave_timeout ();
 
           clutter_event_get_coords (event, &pos.x, &pos.y);
           enter_window = get_window_for_event (display, event, event_actor);
