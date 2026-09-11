@@ -1918,19 +1918,32 @@ meta_seat_x11_ungrab (ClutterSeat *seat,
   MetaSeatX11 *seat_x11 = META_SEAT_X11 (seat);
   MetaBackend *backend = seat_x11->backend;
 
-  if ((seat_x11->grab_state & CLUTTER_GRAB_STATE_POINTER) != 0)
-    {
-      meta_backend_ungrab_device (backend,
-                                  META_VIRTUAL_CORE_POINTER_ID,
-                                  time);
-    }
+  /* DIAGNOSTIC (sloppy-focus-lost-after-resize-50.4 investigation):
+   * meta_backend_ungrab_device()'s underlying XIUngrabDevice() return
+   * value was never checked here, and each device was only even
+   * *attempted* when seat_x11->grab_state's tracked bit for it was
+   * already set - so if that in-process bookkeeping ever desyncs from
+   * the X server's real grab state (confirmed live: grab_state read 0/
+   * NONE via gdb while a completely independent python3-xlib
+   * grab_keyboard() probe reported AlreadyGrabbed), the real server-side
+   * grab is left stuck forever with no further attempt to release it.
+   * Live-confirmed fix: a bare XIUngrabDevice() call for the keyboard,
+   * issued by hand via gdb regardless of grab_state, immediately
+   * restored keyboard delivery. Always attempt both devices unconditionally
+   * here instead of trusting grab_state - XIUngrabDevice() on an already-
+   * ungrabbed device is a harmless no-op, so this is a strictly safer
+   * default than the previous conditional version. */
+  if ((seat_x11->grab_state & CLUTTER_GRAB_STATE_POINTER) == 0)
+    g_message ("INSTR meta_seat_x11_ungrab: grab_state missing POINTER bit, ungrabbing anyway");
+  meta_backend_ungrab_device (backend,
+                              META_VIRTUAL_CORE_POINTER_ID,
+                              time);
 
-  if ((seat_x11->grab_state & CLUTTER_GRAB_STATE_KEYBOARD) != 0)
-    {
-      meta_backend_ungrab_device (backend,
-                                  META_VIRTUAL_CORE_KEYBOARD_ID,
-                                  time);
-    }
+  if ((seat_x11->grab_state & CLUTTER_GRAB_STATE_KEYBOARD) == 0)
+    g_message ("INSTR meta_seat_x11_ungrab: grab_state missing KEYBOARD bit, ungrabbing anyway");
+  meta_backend_ungrab_device (backend,
+                              META_VIRTUAL_CORE_KEYBOARD_ID,
+                              time);
 
   seat_x11->grab_state = CLUTTER_GRAB_STATE_NONE;
 
