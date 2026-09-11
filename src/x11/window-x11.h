@@ -124,3 +124,5 @@ META_EXPORT
 Window meta_window_x11_get_xwindow (MetaWindow *window);
 
 void meta_window_x11_configure (MetaWindow *window);
+
+void meta_window_x11_reselect_all_managed_window_events (MetaDisplay *display);
