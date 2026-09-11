@@ -1129,14 +1129,39 @@ reselect_client_window_input_events (MetaWindow *window,
   XISelectEvents (xdisplay, xwindow, &mask, 1);
 }
 
+/* Public wrapper for reselect_client_window_input_events(), so other files
+ * (window.c's meta_window_focus()) can trigger the same defensive re-select.
+ * See the FIX comment above reselect_client_window_input_events() for why
+ * this exists. Live-observed (2026-09-11): re-selecting only at grab-op-end
+ * was not sufficient by itself - a repro where the resize's own grab-op-end
+ * re-select ran fine (both windows), then a hover-driven focus transfer TO
+ * one of the two windows completed normally, but the OTHER window's
+ * selection was lost again immediately after - suggesting the loss can
+ * also be triggered by the focus-transfer path itself, not only by
+ * resize/move grab-ops. Called from meta_window_focus() as a second,
+ * broader defensive point until the real X-server-side trigger is
+ * understood. */
+void
+meta_window_x11_reselect_all_managed_window_events (MetaDisplay *display)
+{
+  MetaX11Display *x11_display = display->x11_display;
+  GSList *windows, *l;
+
+  if (!x11_display)
+    return;
+
+  windows = meta_display_list_windows (display, META_LIST_DEFAULT);
+  for (l = windows; l; l = l->next)
+    reselect_client_window_input_events (l->data, x11_display->xdisplay);
+  g_slist_free (windows);
+}
+
 static void
 meta_window_x11_grab_op_ended (MetaWindow *window,
                                MetaGrabOp  op)
 {
   MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
   MetaWindowX11Private *priv = meta_window_x11_get_instance_private (window_x11);
-  MetaX11Display *x11_display = window->display->x11_display;
-  GSList *windows, *l;
 
   if (priv->showing_resize_popup)
     {
@@ -1144,13 +1169,7 @@ meta_window_x11_grab_op_ended (MetaWindow *window,
       meta_window_refresh_resize_popup (window);
     }
 
-  if (x11_display)
-    {
-      windows = meta_display_list_windows (window->display, META_LIST_DEFAULT);
-      for (l = windows; l; l = l->next)
-        reselect_client_window_input_events (l->data, x11_display->xdisplay);
-      g_slist_free (windows);
-    }
+  meta_window_x11_reselect_all_managed_window_events (window->display);
 
   META_WINDOW_CLASS (meta_window_x11_parent_class)->grab_op_ended (window, op);
 }
