@@ -1918,7 +1918,7 @@ meta_seat_x11_ungrab (ClutterSeat *seat,
   MetaSeatX11 *seat_x11 = META_SEAT_X11 (seat);
   MetaBackend *backend = seat_x11->backend;
 
-  /* DIAGNOSTIC (sloppy-focus-lost-after-resize-50.4 investigation):
+  /* FIX (sloppy-focus-lost-after-resize-50.4 investigation):
    * meta_backend_ungrab_device()'s underlying XIUngrabDevice() return
    * value was never checked here, and each device was only even
    * *attempted* when seat_x11->grab_state's tracked bit for it was
@@ -1933,14 +1933,9 @@ meta_seat_x11_ungrab (ClutterSeat *seat,
    * here instead of trusting grab_state - XIUngrabDevice() on an already-
    * ungrabbed device is a harmless no-op, so this is a strictly safer
    * default than the previous conditional version. */
-  if ((seat_x11->grab_state & CLUTTER_GRAB_STATE_POINTER) == 0)
-    g_message ("INSTR meta_seat_x11_ungrab: grab_state missing POINTER bit, ungrabbing anyway");
   meta_backend_ungrab_device (backend,
                               META_VIRTUAL_CORE_POINTER_ID,
                               time);
-
-  if ((seat_x11->grab_state & CLUTTER_GRAB_STATE_KEYBOARD) == 0)
-    g_message ("INSTR meta_seat_x11_ungrab: grab_state missing KEYBOARD bit, ungrabbing anyway");
   meta_backend_ungrab_device (backend,
                               META_VIRTUAL_CORE_KEYBOARD_ID,
                               time);
