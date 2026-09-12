@@ -739,10 +739,6 @@ meta_backend_x11_ungrab_device (MetaBackend *backend,
   ret = XIUngrabDevice (priv->xdisplay, device_id, CurrentTime);
   XFlush (priv->xdisplay);
 
-  if (ret != Success)
-    g_message ("INSTR meta_backend_x11_ungrab_device: XIUngrabDevice(device_id=%d, timestamp=%u) FAILED, ret=%d",
-              device_id, timestamp, ret);
-
   return (ret == Success);
 }
 
