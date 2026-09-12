@@ -79,8 +79,6 @@ on_orphaned_leave_timeout (gpointer user_data)
   MetaDisplay *display = user_data;
 
   orphaned_leave_timeout_id = 0;
-  g_message ("INSTR events.c: orphaned LEAVE (no ENTER followed) - "
-            "reactively re-selecting XI2 events on all managed windows");
   meta_window_x11_reselect_all_managed_window_events (display);
 
   return G_SOURCE_REMOVE;
