@@ -1140,7 +1140,22 @@ reselect_client_window_input_events (MetaWindow *window,
  * also be triggered by the focus-transfer path itself, not only by
  * resize/move grab-ops. Called from meta_window_focus() as a second,
  * broader defensive point until the real X-server-side trigger is
- * understood. */
+ * understood.
+ *
+ * FIX (round 15, 2026-09-12): this was passing x11_display->xdisplay to
+ * reselect_client_window_input_events() - live-confirmed via gdb to be a
+ * genuinely SEPARATE X11 connection (different Display* / fd) from the
+ * one meta_seat_x11_translate_event() actually dispatches XI2 events
+ * from (meta-seat-x11.c's xdisplay_from_seat(), which returns
+ * meta_backend_x11_get_xdisplay() - the backend's own connection). XI2
+ * event selection is scoped per-connection, so every one of the three
+ * prior fix attempts (this function's two callers, grab-op-end and
+ * meta_window_focus()) was re-selecting on a connection nobody reads
+ * events from - a no-op for the purpose this function exists for,
+ * despite running to completion with no error each time. Live-confirmed
+ * fix: re-select on the backend's own connection instead, and hover-
+ * focus-follow correctly recovers in both directions immediately
+ * afterward. */
 void
 meta_window_x11_reselect_all_managed_window_events (MetaDisplay *display)
 {
@@ -1150,10 +1165,21 @@ meta_window_x11_reselect_all_managed_window_events (MetaDisplay *display)
   if (!x11_display)
     return;
 
-  windows = meta_display_list_windows (display, META_LIST_DEFAULT);
-  for (l = windows; l; l = l->next)
-    reselect_client_window_input_events (l->data, x11_display->xdisplay);
-  g_slist_free (windows);
+#ifdef HAVE_X11
+  {
+    MetaBackend *backend = meta_context_get_backend (meta_display_get_context (display));
+
+    if (META_IS_BACKEND_X11 (backend))
+      {
+        Display *xdisplay = meta_backend_x11_get_xdisplay (META_BACKEND_X11 (backend));
+
+        windows = meta_display_list_windows (display, META_LIST_DEFAULT);
+        for (l = windows; l; l = l->next)
+          reselect_client_window_input_events (l->data, xdisplay);
+        g_slist_free (windows);
+      }
+  }
+#endif
 }
 
 static void
