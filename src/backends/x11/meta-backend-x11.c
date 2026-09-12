@@ -719,7 +719,24 @@ meta_backend_x11_ungrab_device (MetaBackend *backend,
   MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
   int ret;
 
-  ret = XIUngrabDevice (priv->xdisplay, device_id, timestamp);
+  /* FIX (sloppy-focus-lost-after-resize-50.4 investigation): live-observed,
+   * 3 times, a case where meta_seat_x11_ungrab() ran, XIUngrabDevice() was
+   * called (already made unconditional, see the ungrab-both-devices fix in
+   * meta-seat-x11.c) and mutter's own bookkeeping (grab_state,
+   * clutter_stage_get_grab_actor()) came back completely clean afterward,
+   * yet an independent client's own grab_keyboard()/grab_pointer() probe
+   * still reported AlreadyGrabbed - the X server never actually released
+   * the device. The one thing that reliably fixed it every time, live via
+   * gdb, was reissuing XIUngrabDevice() with CurrentTime (0) instead of
+   * whatever timestamp this call was originally given. X11 grab/ungrab
+   * requests are timestamp-sensitive - a stale or otherwise-rejected
+   * timestamp can make the server silently ignore an ungrab while the
+   * request itself still returns Success, with no distinguishable error.
+   * Ignore the passed-in timestamp entirely for ungrab specifically (unlike
+   * grab, "release it now" has no legitimate reason to need a historical
+   * timestamp) to close this off unconditionally rather than trying to
+   * guarantee the caller always supplies a definitely-fresh one. */
+  ret = XIUngrabDevice (priv->xdisplay, device_id, CurrentTime);
   XFlush (priv->xdisplay);
 
   return (ret == Success);

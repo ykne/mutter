@@ -5108,6 +5108,19 @@ meta_window_focus (MetaWindow  *window,
 
   META_WINDOW_GET_CLASS (window)->focus (window, timestamp);
 
+  /* DIAGNOSTIC/FIX (sloppy-focus-lost-after-resize-50.4 investigation):
+   * live-observed a repro where re-selecting per-window XI2 Enter/Leave/
+   * FocusIn/FocusOut at grab-op-end (see
+   * meta_window_x11_reselect_all_managed_window_events(), called from
+   * meta_window_x11_grab_op_ended()) was not sufficient by itself - the
+   * grab-op-end re-select ran fine for both windows in a two-window
+   * overlap repro, a subsequent hover-driven focus transfer TO one of them
+   * completed correctly, but the OTHER window's selection was lost again
+   * immediately after that focus transfer. Defensively re-select here too,
+   * on every real focus change, until the actual X-server-side trigger for
+   * the loss is understood. */
+  meta_window_x11_reselect_all_managed_window_events (window->display);
+
   /* Move to the front of all workspaces' MRU lists the window
    * is on. We should only be "removing" it from the MRU list if
    * it's already there.  Note that it's possible that we might

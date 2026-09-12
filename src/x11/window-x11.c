@@ -1080,6 +1080,108 @@ meta_window_x11_grab_op_began (MetaWindow *window,
   META_WINDOW_CLASS (meta_window_x11_parent_class)->grab_op_began (window, op);
 }
 
+/* FIX (sloppy-focus-lost-after-resize-50.4 investigation): live-confirmed
+ * via a controlled, scripted pointer sweep across the exact shared pixel
+ * boundary between two real client windows, cross-checked against an
+ * independent X client's own fresh selection on the same two windows:
+ * after an interactive resize/move, the X server stops delivering
+ * XI_Enter/XI_Leave/XI_FocusIn/XI_FocusOut for the windows involved to
+ * THIS client's connection specifically (an independent client's own
+ * fresh selection on the identical windows, and a scripted crossing of
+ * the identical boundary, both received the events correctly at the
+ * same time gnome-shell's own dispatch saw zero) - while gnome-shell's
+ * own selection on the STAGE window, and crossings that pass through
+ * it (background, panel/chrome), keep working the whole time. This is
+ * what made "touch mutter's own chrome" a 100% reliable but incidental
+ * recovery path, and what made this bug look focus-follow-specific when
+ * it's really an X11-level per-window event-selection loss.
+ *
+ * Root trigger not fully understood (why the server stops honoring an
+ * existing, unchanged XISelectEvents() registration for these specific
+ * windows was not root-caused), but the fix is simple and safe:
+ * manually re-issuing the exact same XISelectEvents() call that
+ * meta_window_x11_manage() already does once at map time, live-confirmed via
+ * gdb to immediately restore delivery. Do it defensively for every
+ * managed window whenever an interactive grab op ends, since the
+ * original repro needed it for BOTH windows involved (not just the one
+ * being dragged), and only doing it for the dragged window was not
+ * verified sufficient. */
+static void
+reselect_client_window_input_events (MetaWindow *window,
+                                     Display    *xdisplay)
+{
+  Window xwindow;
+  unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+  XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
+
+  if (!META_IS_WINDOW_X11 (window))
+    return;
+
+  xwindow = meta_window_x11_get_xwindow (window);
+  if (xwindow == None)
+    return;
+
+  XISetMask (mask.mask, XI_Enter);
+  XISetMask (mask.mask, XI_Leave);
+  XISetMask (mask.mask, XI_FocusIn);
+  XISetMask (mask.mask, XI_FocusOut);
+
+  XISelectEvents (xdisplay, xwindow, &mask, 1);
+}
+
+/* Public wrapper for reselect_client_window_input_events(), so other files
+ * (window.c's meta_window_focus()) can trigger the same defensive re-select.
+ * See the FIX comment above reselect_client_window_input_events() for why
+ * this exists. Live-observed (2026-09-11): re-selecting only at grab-op-end
+ * was not sufficient by itself - a repro where the resize's own grab-op-end
+ * re-select ran fine (both windows), then a hover-driven focus transfer TO
+ * one of the two windows completed normally, but the OTHER window's
+ * selection was lost again immediately after - suggesting the loss can
+ * also be triggered by the focus-transfer path itself, not only by
+ * resize/move grab-ops. Called from meta_window_focus() as a second,
+ * broader defensive point until the real X-server-side trigger is
+ * understood.
+ *
+ * FIX (round 15, 2026-09-12): this was passing x11_display->xdisplay to
+ * reselect_client_window_input_events() - live-confirmed via gdb to be a
+ * genuinely SEPARATE X11 connection (different Display* / fd) from the
+ * one meta_seat_x11_translate_event() actually dispatches XI2 events
+ * from (meta-seat-x11.c's xdisplay_from_seat(), which returns
+ * meta_backend_x11_get_xdisplay() - the backend's own connection). XI2
+ * event selection is scoped per-connection, so every one of the three
+ * prior fix attempts (this function's two callers, grab-op-end and
+ * meta_window_focus()) was re-selecting on a connection nobody reads
+ * events from - a no-op for the purpose this function exists for,
+ * despite running to completion with no error each time. Live-confirmed
+ * fix: re-select on the backend's own connection instead, and hover-
+ * focus-follow correctly recovers in both directions immediately
+ * afterward. */
+void
+meta_window_x11_reselect_all_managed_window_events (MetaDisplay *display)
+{
+  MetaX11Display *x11_display = display->x11_display;
+  GSList *windows, *l;
+
+  if (!x11_display)
+    return;
+
+#ifdef HAVE_X11
+  {
+    MetaBackend *backend = meta_context_get_backend (meta_display_get_context (display));
+
+    if (META_IS_BACKEND_X11 (backend))
+      {
+        Display *xdisplay = meta_backend_x11_get_xdisplay (META_BACKEND_X11 (backend));
+
+        windows = meta_display_list_windows (display, META_LIST_DEFAULT);
+        for (l = windows; l; l = l->next)
+          reselect_client_window_input_events (l->data, xdisplay);
+        g_slist_free (windows);
+      }
+  }
+#endif
+}
+
 static void
 meta_window_x11_grab_op_ended (MetaWindow *window,
                                MetaGrabOp  op)
@@ -1092,6 +1194,8 @@ meta_window_x11_grab_op_ended (MetaWindow *window,
       priv->showing_resize_popup = FALSE;
       meta_window_refresh_resize_popup (window);
     }
+
+  meta_window_x11_reselect_all_managed_window_events (window->display);
 
   META_WINDOW_CLASS (meta_window_x11_parent_class)->grab_op_ended (window, op);
 }
