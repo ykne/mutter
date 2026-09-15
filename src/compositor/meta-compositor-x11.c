@@ -472,7 +472,17 @@ meta_change_buttons_grab (MetaCompositorX11   *compositor_x11,
                           int                  modmask)
 {
 #define MAX_BUTTON 3
+  MetaBackend *backend =
+    meta_compositor_get_backend (META_COMPOSITOR (compositor_x11));
+  Display *xdisplay =
+    meta_backend_x11_get_xdisplay (META_BACKEND_X11 (backend));
   int i;
+
+  /* See the identical comment in meta_compositor_x11_change_keygrab():
+   * a per-call trap in meta_backend_x11_passive_button_grab()/_ungrab()
+   * is too narrow, since X errors are asynchronous and can arrive after
+   * a later call's own trap is already open. Trap the whole batch. */
+  mtk_x11_error_trap_push (xdisplay);
 
   /* Grab Alt + button1 for moving window.
    * Grab Alt + button2 for resizing window.
@@ -488,6 +498,9 @@ meta_change_buttons_grab (MetaCompositorX11   *compositor_x11,
   meta_change_button_grab (compositor_x11, xwindow,
                            grab, grab_mode,
                            1, modmask | CLUTTER_SHIFT_MASK);
+
+  XSync (xdisplay, False);
+  mtk_x11_error_trap_pop (xdisplay);
 
 #undef MAX_BUTTON
 }
@@ -621,8 +634,19 @@ meta_compositor_x11_change_keygrab (MetaCompositorX11     *compositor_x11,
   MetaBackend *backend =
     meta_compositor_get_backend (META_COMPOSITOR (compositor_x11));
   MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
+  Display *xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
   xkb_mod_mask_t ignored_modifier_mask = keys->ignored_modifier_mask;
   int i;
+
+  /* Errors for one keycode's grab/ungrab request can arrive on the wire
+   * after that request's own round trip has already completed (X errors
+   * are inherently asynchronous, even for requests that also have a
+   * reply). Trapping each keycode individually leaves a window where a
+   * straggling error from keycode N arrives while we're already inside
+   * the (separate, already-popped) trap for keycode N+1, so it escapes
+   * and gets reported as fatal. Trap the whole loop at once instead.
+   */
+  mtk_x11_error_trap_push (xdisplay);
 
   for (i = 0; i < resolved_combo->len; i++)
     {
@@ -649,6 +673,9 @@ meta_compositor_x11_change_keygrab (MetaCompositorX11     *compositor_x11,
                                                mods);
         }
     }
+
+  XSync (xdisplay, False);
+  mtk_x11_error_trap_pop (xdisplay);
 }
 
 static void
