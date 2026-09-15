@@ -35,6 +35,7 @@
 
 #include <X11/XKBlib.h>
 #include <X11/Xlib-xcb.h>
+#include <X11/cursorfont.h>
 #include <X11/extensions/sync.h>
 #include <stdlib.h>
 #include <string.h>
@@ -685,6 +686,7 @@ meta_backend_x11_grab_device (MetaBackend *backend,
   MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
   unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
   XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
+  Cursor xcursor = None;
   int ret;
 
   if (timestamp != META_CURRENT_TIME &&
@@ -699,13 +701,35 @@ meta_backend_x11_grab_device (MetaBackend *backend,
   XISetMask (mask.mask, XI_KeyPress);
   XISetMask (mask.mask, XI_KeyRelease);
 
+  /* FIX (Overview cursor-carryover nuisance): this is the only device
+   * grab used for Clutter's generic modal seat grab (clutter_seat_grab(),
+   * which Overview/DnD/popup modes go through). Passing cursor=None here
+   * means X11 falls back to its normal per-window cursor resolution for
+   * as long as the grab is held - i.e. purely by X11 protocol semantics,
+   * whatever real client window physically sits under the pointer still
+   * supplies the displayed cursor shape (e.g. a text widget's I-beam),
+   * completely independent of owner_events=False routing every actual
+   * event elsewhere (to the Shell). Live-confirmed via xdotool: the same
+   * real client window ID remains "under the pointer" both immediately
+   * before and immediately after entering Overview with the mouse held
+   * still - so the I-beam (or whatever cursor the hovered widget had)
+   * visibly persists into Overview instead of resetting to the default
+   * arrow. Passing an explicit default cursor for the duration of this
+   * modal grab fixes the display without touching event routing. Not
+   * used for interactive resize/move - those set their own cursor via a
+   * separate mechanism (MetaCursorRendererX11's active-grab-op handling). */
+  xcursor = XCreateFontCursor (priv->xdisplay, XC_left_ptr);
+
   ret = XIGrabDevice (priv->xdisplay, device_id,
                       meta_backend_x11_get_xwindow (x11),
                       timestamp,
-                      None,
+                      xcursor,
                       XIGrabModeAsync, XIGrabModeAsync,
                       False, /* owner_events */
                       &mask);
+
+  if (xcursor != None)
+    XFreeCursor (priv->xdisplay, xcursor);
 
   return (ret == Success);
 }
