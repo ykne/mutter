@@ -35,6 +35,7 @@
 
 #include <X11/XKBlib.h>
 #include <X11/Xlib-xcb.h>
+#include <X11/cursorfont.h>
 #include <X11/extensions/sync.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,7 +56,10 @@
 #include "backends/x11/meta-xkb-a11y-x11.h"
 #include "clutter/clutter.h"
 #include "compositor/compositor-private.h"
+#include "compositor/meta-window-drag.h"
 #include "core/display-private.h"
+#include "meta/display.h"
+#include "meta/meta-context.h"
 #include "meta/meta-cursor-tracker.h"
 #include "meta/util.h"
 #include "mtk/mtk-x11.h"
@@ -685,6 +689,7 @@ meta_backend_x11_grab_device (MetaBackend *backend,
   MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
   unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
   XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
+  Cursor xcursor = None;
   int ret;
 
   if (timestamp != META_CURRENT_TIME &&
@@ -699,13 +704,57 @@ meta_backend_x11_grab_device (MetaBackend *backend,
   XISetMask (mask.mask, XI_KeyPress);
   XISetMask (mask.mask, XI_KeyRelease);
 
+  /* FIX (Overview cursor-carryover nuisance): this is the only device
+   * grab used for Clutter's generic modal seat grab (clutter_seat_grab(),
+   * which Overview/DnD/popup modes - and, via
+   * clutter_stage_grab_input_only_inactive(), interactive resize/move too -
+   * all go through). Passing cursor=None here means X11 resolves the
+   * displayed cursor dynamically via normal per-window hit-testing for as
+   * long as the grab is held - i.e. purely by X11 protocol semantics,
+   * whatever real client window physically sits under the pointer keeps
+   * supplying the displayed cursor shape live, completely independent of
+   * owner_events=False routing every actual event elsewhere (to the
+   * Shell/compositor). Outside of an active resize/move, nothing else
+   * updates the cursor at all, so a hovered widget's stale cursor (e.g. a
+   * text widget's I-beam) visibly persists into Overview instead of
+   * resetting to the default arrow - live-confirmed via xdotool/XFixes
+   * before/after screenshots.
+   *
+   * Interactive resize/move relies on this exact same dynamic cursor=None
+   * behavior: MetaCursorRendererX11's active-grab-op handling
+   * (get_active_grab_op_cursor_type(), force_sw_cursor path) continuously
+   * calls XDefineCursor() on this same grab window throughout the drag to
+   * show the correct per-edge resize icon, and that only has any visible
+   * effect because the active grab's own cursor is None (dynamic) rather
+   * than a value fixed at grab time - an explicit non-None grab cursor
+   * would freeze the display for the whole grab, hiding those updates
+   * (confirmed live: an earlier, unconditional version of this fix broke
+   * resize-cursor display entirely). So only force the explicit default
+   * cursor when there is no active window drag - i.e. exactly the
+   * Overview/DnD/popup case this fix targets - and keep None (preserving
+   * the existing resize/move behavior) otherwise. */
+  {
+    MetaContext *context = meta_backend_get_context (backend);
+    MetaDisplay *display = meta_context_get_display (context);
+    MetaCompositor *compositor =
+      display ? meta_display_get_compositor (display) : NULL;
+    MetaWindowDrag *window_drag =
+      compositor ? meta_compositor_get_current_window_drag (compositor) : NULL;
+
+    if (!window_drag)
+      xcursor = XCreateFontCursor (priv->xdisplay, XC_left_ptr);
+  }
+
   ret = XIGrabDevice (priv->xdisplay, device_id,
                       meta_backend_x11_get_xwindow (x11),
                       timestamp,
-                      None,
+                      xcursor,
                       XIGrabModeAsync, XIGrabModeAsync,
                       False, /* owner_events */
                       &mask);
+
+  if (xcursor != None)
+    XFreeCursor (priv->xdisplay, xcursor);
 
   return (ret == Success);
 }
