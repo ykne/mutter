@@ -1250,6 +1250,12 @@ meta_backend_x11_passive_button_ungrab (MetaBackendX11      *backend_x11,
   mtk_x11_error_trap_pop (priv->xdisplay);
 }
 
+/* Callers must wrap (potentially multiple) grab/ungrab calls in their own
+ * mtk_x11_error_trap_push()/pop() around a final XSync(); see
+ * meta_compositor_x11_change_keygrab(). A per-call trap here would be too
+ * narrow: X errors are asynchronous, so an error for one call can arrive
+ * only after a subsequent call's own (separate) trap has already opened,
+ * letting it escape and be reported as fatal. */
 void
 meta_backend_x11_passive_key_grab (MetaBackendX11      *backend_x11,
                                    Window               xwindow,
@@ -1262,8 +1268,6 @@ meta_backend_x11_passive_key_grab (MetaBackendX11      *backend_x11,
   unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
   XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
 
-  mtk_x11_error_trap_push (priv->xdisplay);
-
   XISetMask (mask.mask, XI_KeyPress);
   XISetMask (mask.mask, XI_KeyRelease);
 
@@ -1275,10 +1279,6 @@ meta_backend_x11_passive_key_grab (MetaBackendX11      *backend_x11,
                   XIGrabModeAsync),
                  XIGrabModeAsync, False,
                  &mask, mods->len, (XIGrabModifiers *)mods->data);
-
-  XSync (priv->xdisplay, False);
-
-  mtk_x11_error_trap_pop (priv->xdisplay);
 }
 
 void
@@ -1292,8 +1292,6 @@ meta_backend_x11_passive_key_ungrab (MetaBackendX11      *backend_x11,
   unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
   XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
 
-  mtk_x11_error_trap_push (priv->xdisplay);
-
   XISetMask (mask.mask, XI_KeyPress);
   XISetMask (mask.mask, XI_KeyRelease);
 
@@ -1301,10 +1299,6 @@ meta_backend_x11_passive_key_ungrab (MetaBackendX11      *backend_x11,
                    META_VIRTUAL_CORE_KEYBOARD_ID,
                    keycode, xwindow,
                    mods->len, (XIGrabModifiers *)mods->data);
-
-  XSync (priv->xdisplay, False);
-
-  mtk_x11_error_trap_pop (priv->xdisplay);
 }
 
 void
