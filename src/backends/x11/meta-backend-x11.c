@@ -56,7 +56,10 @@
 #include "backends/x11/meta-xkb-a11y-x11.h"
 #include "clutter/clutter.h"
 #include "compositor/compositor-private.h"
+#include "compositor/meta-window-drag.h"
 #include "core/display-private.h"
+#include "meta/display.h"
+#include "meta/meta-context.h"
 #include "meta/meta-cursor-tracker.h"
 #include "meta/util.h"
 #include "mtk/mtk-x11.h"
@@ -703,22 +706,44 @@ meta_backend_x11_grab_device (MetaBackend *backend,
 
   /* FIX (Overview cursor-carryover nuisance): this is the only device
    * grab used for Clutter's generic modal seat grab (clutter_seat_grab(),
-   * which Overview/DnD/popup modes go through). Passing cursor=None here
-   * means X11 falls back to its normal per-window cursor resolution for
-   * as long as the grab is held - i.e. purely by X11 protocol semantics,
-   * whatever real client window physically sits under the pointer still
-   * supplies the displayed cursor shape (e.g. a text widget's I-beam),
-   * completely independent of owner_events=False routing every actual
-   * event elsewhere (to the Shell). Live-confirmed via xdotool: the same
-   * real client window ID remains "under the pointer" both immediately
-   * before and immediately after entering Overview with the mouse held
-   * still - so the I-beam (or whatever cursor the hovered widget had)
-   * visibly persists into Overview instead of resetting to the default
-   * arrow. Passing an explicit default cursor for the duration of this
-   * modal grab fixes the display without touching event routing. Not
-   * used for interactive resize/move - those set their own cursor via a
-   * separate mechanism (MetaCursorRendererX11's active-grab-op handling). */
-  xcursor = XCreateFontCursor (priv->xdisplay, XC_left_ptr);
+   * which Overview/DnD/popup modes - and, via
+   * clutter_stage_grab_input_only_inactive(), interactive resize/move too -
+   * all go through). Passing cursor=None here means X11 resolves the
+   * displayed cursor dynamically via normal per-window hit-testing for as
+   * long as the grab is held - i.e. purely by X11 protocol semantics,
+   * whatever real client window physically sits under the pointer keeps
+   * supplying the displayed cursor shape live, completely independent of
+   * owner_events=False routing every actual event elsewhere (to the
+   * Shell/compositor). Outside of an active resize/move, nothing else
+   * updates the cursor at all, so a hovered widget's stale cursor (e.g. a
+   * text widget's I-beam) visibly persists into Overview instead of
+   * resetting to the default arrow - live-confirmed via xdotool/XFixes
+   * before/after screenshots.
+   *
+   * Interactive resize/move relies on this exact same dynamic cursor=None
+   * behavior: MetaCursorRendererX11's active-grab-op handling
+   * (get_active_grab_op_cursor_type(), force_sw_cursor path) continuously
+   * calls XDefineCursor() on this same grab window throughout the drag to
+   * show the correct per-edge resize icon, and that only has any visible
+   * effect because the active grab's own cursor is None (dynamic) rather
+   * than a value fixed at grab time - an explicit non-None grab cursor
+   * would freeze the display for the whole grab, hiding those updates
+   * (confirmed live: an earlier, unconditional version of this fix broke
+   * resize-cursor display entirely). So only force the explicit default
+   * cursor when there is no active window drag - i.e. exactly the
+   * Overview/DnD/popup case this fix targets - and keep None (preserving
+   * the existing resize/move behavior) otherwise. */
+  {
+    MetaContext *context = meta_backend_get_context (backend);
+    MetaDisplay *display = meta_context_get_display (context);
+    MetaCompositor *compositor =
+      display ? meta_display_get_compositor (display) : NULL;
+    MetaWindowDrag *window_drag =
+      compositor ? meta_compositor_get_current_window_drag (compositor) : NULL;
+
+    if (!window_drag)
+      xcursor = XCreateFontCursor (priv->xdisplay, XC_left_ptr);
+  }
 
   ret = XIGrabDevice (priv->xdisplay, device_id,
                       meta_backend_x11_get_xwindow (x11),
