@@ -1196,6 +1196,12 @@ meta_backend_x11_get_barriers (MetaBackendX11 *backend_x11)
   return priv->barriers;
 }
 
+/* Callers must wrap (potentially multiple) grab/ungrab calls in their own
+ * mtk_x11_error_trap_push()/pop() around a final XSync(); see
+ * meta_change_buttons_grab(). A per-call trap here would be too narrow:
+ * X errors are asynchronous, so an error for one call can arrive only
+ * after a subsequent call's own (separate) trap has already opened,
+ * letting it escape and be reported as fatal. */
 void
 meta_backend_x11_passive_button_grab (MetaBackendX11      *backend_x11,
                                       Window               xwindow,
@@ -1207,8 +1213,6 @@ meta_backend_x11_passive_button_grab (MetaBackendX11      *backend_x11,
     meta_backend_x11_get_instance_private (backend_x11);
   unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
   XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
-
-  mtk_x11_error_trap_push (priv->xdisplay);
 
   XISetMask (mask.mask, XI_ButtonPress);
   XISetMask (mask.mask, XI_ButtonRelease);
@@ -1222,10 +1226,6 @@ meta_backend_x11_passive_button_grab (MetaBackendX11      *backend_x11,
                  XIGrabModeAsync),
                 XIGrabModeAsync, False,
                 &mask, mods->len, (XIGrabModifiers *)mods->data);
-
-  XSync (priv->xdisplay, False);
-
-  mtk_x11_error_trap_pop (priv->xdisplay);
 }
 
 void
@@ -1237,17 +1237,10 @@ meta_backend_x11_passive_button_ungrab (MetaBackendX11      *backend_x11,
   MetaBackendX11Private *priv =
     meta_backend_x11_get_instance_private (backend_x11);
 
-  mtk_x11_error_trap_push (priv->xdisplay);
-
-
   XIUngrabButton (priv->xdisplay,
                   META_VIRTUAL_CORE_POINTER_ID,
                   button, xwindow,
                   mods->len, (XIGrabModifiers *)mods->data);
-
-  XSync (priv->xdisplay, False);
-
-  mtk_x11_error_trap_pop (priv->xdisplay);
 }
 
 /* Callers must wrap (potentially multiple) grab/ungrab calls in their own
