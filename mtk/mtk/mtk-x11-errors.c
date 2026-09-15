@@ -110,8 +110,40 @@ display_error_event (Display     *xdisplay,
   if (!ignore)
     {
       char buf[64];
+      const char *request_name;
+      gboolean benign_window_race;
 
       XGetErrorText (xdisplay, error->error_code, buf, 63);
+      request_name = decode_request_code (xdisplay, error->request_code);
+
+      /* BadWindow from XISelectEvents (XI2 request 46) is an inherent,
+       * unavoidable race: mutter re-selects XI2 events on a window (on
+       * focus transfers, enter/leave, after grab changes, etc.) whenever
+       * something about it changes, and X reports errors asynchronously
+       * - the window can legitimately have been destroyed by the client
+       * (e.g. its close button was clicked) between when mutter decided
+       * to re-select events on it and when the request is processed.
+       * No amount of trap-window sizing can fully close this: the error
+       * can arrive after arbitrarily many intervening requests, from any
+       * of the many call sites that re-select XI2 events, not just a
+       * single narrow operation. Treat it as an expected, benign race
+       * instead of a fatal bug. */
+      benign_window_race = (error->error_code == BadWindow &&
+                            error->minor_code == 46 /* X_XISelectEvents */ &&
+                            g_strcmp0 (request_name, "XInputExtension") == 0);
+
+      if (benign_window_race)
+        {
+          g_warning ("Ignoring an X Window System error for a window that "
+                    "was likely already destroyed.\n"
+                    "  (Details: serial %ld error_code %d request_code %d (%s) minor_code %d)",
+                    error->serial,
+                    error->error_code,
+                    error->request_code,
+                    request_name,
+                    error->minor_code);
+          return;
+        }
 
       g_error ("Received an X Window System error.\n"
                "This probably reflects a bug in the program.\n"
@@ -126,7 +158,7 @@ display_error_event (Display     *xdisplay,
                error->serial,
                error->error_code,
                error->request_code,
-               decode_request_code (xdisplay, error->request_code),
+               request_name,
                error->minor_code);
     }
 }
