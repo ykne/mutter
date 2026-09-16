@@ -35,13 +35,24 @@ struct _MetaCursorRendererX11Nested
 G_DEFINE_TYPE (MetaCursorRendererX11Nested, meta_cursor_renderer_x11_nested,
                META_TYPE_CURSOR_RENDERER);
 
-static gboolean
+static void
 meta_cursor_renderer_x11_nested_update_cursor (MetaCursorRenderer *renderer,
                                                ClutterCursor      *cursor_sprite)
 {
   if (cursor_sprite)
     clutter_cursor_realize_texture (cursor_sprite);
-  return TRUE;
+}
+
+/* Nested mode has no real hardware cursor of its own to speak of (it's
+ * just a client window of an outer session) - always want the generic
+ * base-class software overlay, matching the old update_cursor()'s
+ * unconditional "return TRUE" (needs_overlay) before mutter 50.5 split
+ * that out into this separate per-view vfunc. */
+static gboolean
+meta_cursor_renderer_x11_nested_view_has_hw_cursor (MetaCursorRenderer *renderer,
+                                                    ClutterStageView   *view)
+{
+  return FALSE;
 }
 
 static Cursor
@@ -94,6 +105,7 @@ meta_cursor_renderer_x11_nested_class_init (MetaCursorRendererX11NestedClass *kl
   object_class->constructed = meta_cursor_renderer_x11_nested_constructed;
 
   renderer_class->update_cursor = meta_cursor_renderer_x11_nested_update_cursor;
+  renderer_class->view_has_hw_cursor = meta_cursor_renderer_x11_nested_view_has_hw_cursor;
 }
 
 static void

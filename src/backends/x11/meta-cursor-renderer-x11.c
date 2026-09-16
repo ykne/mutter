@@ -160,6 +160,26 @@ create_x_cursor_from_xfixes_image (Display *xdisplay)
   return xcursor;
 }
 
+/* mutter 50.5 replaced meta_overlay_set_visible(overlay, bool) with the
+ * per-view meta_overlay_set_view_visible(overlay, view, bool) (real
+ * multi-monitor mixed hw/sw cursor support - see the class_init comment
+ * on view_has_hw_cursor() further down). This backend's own separate
+ * sw_cursor_overlay (distinct from the generic base-class overlay) needs
+ * the same "set on every view" treatment the base class's own
+ * meta_cursor_renderer_update_stage_overlay() now does - there is no
+ * "all views" convenience call any more, visibility is tracked per-view
+ * internally. */
+static void
+set_sw_cursor_overlay_visible (MetaOverlay  *overlay,
+                               ClutterActor *stage,
+                               gboolean      is_visible)
+{
+  GList *l;
+
+  for (l = clutter_stage_peek_stage_views (CLUTTER_STAGE (stage)); l; l = l->next)
+    meta_overlay_set_view_visible (overlay, CLUTTER_STAGE_VIEW (l->data), is_visible);
+}
+
 /* On a display device with no real hardware cursor plane at all (e.g.
  * QEMU's plain "std VGA", bound to the bochs-drm kernel driver, which
  * exposes exactly one DRM plane total), nothing else on this X server -
@@ -199,7 +219,7 @@ update_sw_cursor_overlay (MetaCursorRendererX11 *x11,
   if (!image)
     {
       x11->sw_cursor_last_valid = FALSE;
-      meta_overlay_set_visible (x11->sw_cursor_overlay, FALSE);
+      set_sw_cursor_overlay_visible (x11->sw_cursor_overlay, stage, FALSE);
       return;
     }
 
@@ -209,7 +229,7 @@ update_sw_cursor_overlay (MetaCursorRendererX11 *x11,
   if (width <= 0 || height <= 0)
     {
       x11->sw_cursor_last_valid = FALSE;
-      meta_overlay_set_visible (x11->sw_cursor_overlay, FALSE);
+      set_sw_cursor_overlay_visible (x11->sw_cursor_overlay, stage, FALSE);
       XFree (image);
       return;
     }
@@ -270,7 +290,7 @@ update_sw_cursor_overlay (MetaCursorRendererX11 *x11,
     {
       g_warning ("Failed to allocate software cursor texture: %s",
                 error->message);
-      meta_overlay_set_visible (x11->sw_cursor_overlay, FALSE);
+      set_sw_cursor_overlay_visible (x11->sw_cursor_overlay, stage, FALSE);
       XFree (image);
       return;
     }
@@ -325,7 +345,7 @@ update_sw_cursor_overlay (MetaCursorRendererX11 *x11,
 
   graphene_matrix_init_identity (&matrix);
 
-  meta_overlay_set_visible (x11->sw_cursor_overlay, TRUE);
+  set_sw_cursor_overlay_visible (x11->sw_cursor_overlay, stage, TRUE);
   meta_stage_update_cursor_overlay (META_STAGE (stage),
                                     x11->sw_cursor_overlay,
                                     texture,
@@ -453,7 +473,7 @@ get_active_grab_op_cursor_type (MetaBackend *backend)
     }
 }
 
-static gboolean
+static void
 meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
                                         ClutterCursor      *cursor_sprite)
 {
@@ -468,7 +488,7 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
     {
       if (cursor_sprite)
         clutter_cursor_realize_texture (cursor_sprite);
-      return TRUE;
+      return;
     }
 
   gboolean has_server_cursor = FALSE;
@@ -572,15 +592,36 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
        * cursor; the out-of-band one stays visible regardless. */
       update_sw_cursor_overlay (x11, backend, xdisplay);
 
-      return FALSE;
+      return;
     }
+
+  /* Generic base-class overlay suppression now lives in
+   * view_has_hw_cursor() below (mutter 50.5's per-view cursor-overlay
+   * refactor moved this out of update_cursor()'s old gboolean return
+   * value) - see that function's comment for why it must stay
+   * unconditional for this backend. */
+}
+
+static gboolean
+meta_cursor_renderer_x11_view_has_hw_cursor (MetaCursorRenderer *renderer,
+                                             ClutterStageView   *view)
+{
+  MetaBackend *backend = meta_cursor_renderer_get_backend (renderer);
+  MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
+  Window xwindow = meta_backend_x11_get_xwindow (backend_x11);
+
+  /* Before the backend has a real xwindow yet (startup race - see the
+   * early-return in update_cursor() above), claim no hw cursor so the
+   * base class's generic overlay covers this narrow window instead. */
+  if (xwindow == None)
+    return FALSE;
 
   /* Never let MetaCursorRenderer's own generic ClutterCursor-based stage
    * overlay activate for this backend, regardless of whether a native
-   * XDefineCursor() cursor is currently showing (has_server_cursor).
-   * That overlay's position is driven by stage motion events - but this
-   * project's own input-region hole-punching architecture
-   * (js/ui/layout.js's _updateRegions(), see
+   * XDefineCursor() cursor is currently showing (has_server_cursor,
+   * local to update_cursor() above). That overlay's position is driven
+   * by stage motion events - but this project's own input-region
+   * hole-punching architecture (js/ui/layout.js's _updateRegions(), see
    * project_x11_input_region_architecture_revert.md) deliberately routes
    * real pointer motion straight to whichever client window currently
    * owns that screen area, bypassing the stage entirely once the pointer
@@ -594,8 +635,10 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
    * it does zero compositor-side cursor rendering of its own and shows a
    * single, correctly-tracking, correctly-shaped cursor throughout -
    * matching that (pure native rendering, no compositor-drawn overlay at
-   * all) is the fix, not building a better compositor-drawn overlay. */
-  return FALSE;
+   * all) is the fix, not building a better compositor-drawn overlay.
+   * (This ignores @view - this backend has exactly one X display/xwindow,
+   * no real per-view hardware cursor planes to distinguish.) */
+  return TRUE;
 }
 
 static void
@@ -626,6 +669,7 @@ meta_cursor_renderer_x11_class_init (MetaCursorRendererX11Class *klass)
 
   object_class->finalize = meta_cursor_renderer_x11_finalize;
   renderer_class->update_cursor = meta_cursor_renderer_x11_update_cursor;
+  renderer_class->view_has_hw_cursor = meta_cursor_renderer_x11_view_has_hw_cursor;
 }
 
 static void
