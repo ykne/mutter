@@ -25,6 +25,7 @@
 #include "backends/x11/meta-cursor-renderer-x11.h"
 
 #include <X11/Xcursor/Xcursor.h>
+#include <X11/Xutil.h>
 #include <X11/extensions/Xfixes.h>
 #include <math.h>
 
@@ -118,6 +119,70 @@ create_x_cursor (Display           *xdisplay,
  * update_sw_cursor_overlay() below, just fed into XDefineCursor()
  * instead of a Cogl texture) rather than trying to route anything
  * through the xcursor-type-specific sprite machinery at all. */
+
+/* create_x_cursor_from_xfixes_image() mirrors whatever cursor the X
+ * server currently, globally considers active - correct when that state
+ * genuinely comes from some OTHER real window (the mutter-x11-frames CSD
+ * decoration helper's own resize-edge XDefineCursor call is the reason
+ * this mirror exists at all, see the comment on its call site below) but
+ * self-referential and WRONG when @xwindow (this renderer's own window)
+ * is itself the one currently under the pointer: in that case the query
+ * just reads back whatever @xwindow's cursor was last defined as by this
+ * very function, and re-applying it is a no-op that can never correct a
+ * stale shape left over from a race at the moment the pointer crossed
+ * from a real client window (e.g. a terminal's I-beam) onto @xwindow -
+ * once that happens it's a stable fixed point, reproducing exactly as
+ * "hovering the top or bottom panel after leaving a text-entry client
+ * never goes back to a plain arrow" (see
+ * project_edge_resize_broken.md's hover-shape-sync history - this is a
+ * distinct, previously-unnoticed gap in that same mechanism, not a
+ * regression in it). Walk down from the root the same way XQueryPointer
+ * naturally does, following each level's reported child, to find the
+ * real window currently under the pointer; only trust the mirror when
+ * that walk ends on some window other than @xwindow AND that window
+ * looks like a real client (has a WM_CLASS) - mutter's own internal
+ * chrome windows (the stage/@xwindow itself, the background guard
+ * window) never set one. */
+static gboolean
+pointer_is_over_other_real_window (Display *xdisplay,
+                                   Window   xwindow)
+{
+  Window root = DefaultRootWindow (xdisplay);
+  Window cur = root;
+
+  while (TRUE)
+    {
+      Window root_ret, child_ret;
+      int root_x, root_y, win_x, win_y;
+      unsigned int mask;
+
+      if (!XQueryPointer (xdisplay, cur, &root_ret, &child_ret,
+                          &root_x, &root_y, &win_x, &win_y, &mask))
+        return FALSE;
+
+      if (child_ret == None)
+        break;
+
+      cur = child_ret;
+    }
+
+  if (cur == root || cur == xwindow)
+    return FALSE;
+
+  XClassHint class_hint = { 0 };
+  gboolean has_class = XGetClassHint (xdisplay, cur, &class_hint) != 0;
+
+  if (has_class)
+    {
+      if (class_hint.res_name)
+        XFree (class_hint.res_name);
+      if (class_hint.res_class)
+        XFree (class_hint.res_class);
+    }
+
+  return has_class;
+}
+
 static Cursor
 create_x_cursor_from_xfixes_image (Display *xdisplay)
 {
@@ -529,8 +594,19 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
        * live XFixes cursor image anyway, so mutter's own window (the
        * only thing observed to actually influence this VM's hardware
        * pointer - see project_edge_resize_broken.md) reflects real
-       * per-widget hover cursor changes too, not just active grabs. */
-      Cursor xcursor = create_x_cursor_from_xfixes_image (xdisplay);
+       * per-widget hover cursor changes too, not just active grabs.
+       * Only trust that mirrored image when it plausibly comes from
+       * some OTHER real window (see pointer_is_over_other_real_window()'s
+       * own comment) - otherwise fall back to a plain default arrow
+       * rather than self-referentially echoing whatever @xwindow's
+       * cursor last happened to be. */
+      Cursor xcursor = None;
+
+      if (pointer_is_over_other_real_window (xdisplay, xwindow))
+        xcursor = create_x_cursor_from_xfixes_image (xdisplay);
+
+      if (!xcursor)
+        xcursor = create_x_cursor (xdisplay, CLUTTER_CURSOR_DEFAULT);
 
       if (xcursor)
         {
