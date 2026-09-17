@@ -97,6 +97,15 @@ cogl_driver_is_hardware_accelerated (CoglDriver *driver)
     return FALSE;
 }
 
+void
+cogl_driver_clear_texture_units (CoglDriver *driver)
+{
+  CoglDriverClass *klass = COGL_DRIVER_GET_CLASS (driver);
+
+  if (klass->clear_texture_units)
+    klass->clear_texture_units (driver);
+}
+
 const char *
 cogl_driver_get_vendor (CoglDriver *driver)
 {

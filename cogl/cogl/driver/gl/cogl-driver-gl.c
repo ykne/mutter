@@ -56,10 +56,16 @@
 
 G_DEFINE_TYPE_WITH_PRIVATE (CoglDriverGL, cogl_driver_gl, COGL_TYPE_DRIVER);
 
+/* Drops each texture unit's "currently bound layer" reference. Safe to
+ * call more than once (e.g. once explicitly early during context
+ * teardown, then again - a no-op by then - from dispose()): a stray
+ * layer left bound here is otherwise the last thing keeping some
+ * window's texture (e.g. a CoglTexturePixmapX11) alive, and unreffing
+ * it via dispose()'s own late cascade runs after the context's display
+ * is already cleared, which crashes. */
 static void
-cogl_driver_gl_dispose (GObject *object)
+clear_texture_unit_layers (CoglDriverGL *driver)
 {
-  CoglDriverGL *driver = COGL_DRIVER_GL (object);
   CoglDriverGLPrivate *priv =
     cogl_driver_gl_get_instance_private (driver);
   int i;
@@ -69,8 +75,31 @@ cogl_driver_gl_dispose (GObject *object)
       CoglTextureUnit *unit =
         &g_array_index (priv->texture_units, CoglTextureUnit, i);
 
-      if (unit->layer)
-        g_object_unref (unit->layer);
+      g_clear_object (&unit->layer);
+    }
+}
+
+static void
+cogl_driver_gl_clear_texture_units (CoglDriver *driver)
+{
+  clear_texture_unit_layers (COGL_DRIVER_GL (driver));
+}
+
+static void
+cogl_driver_gl_dispose (GObject *object)
+{
+  CoglDriverGL *driver = COGL_DRIVER_GL (object);
+  CoglDriverGLPrivate *priv =
+    cogl_driver_gl_get_instance_private (driver);
+  int i;
+
+  clear_texture_unit_layers (driver);
+
+  for (i = 0; i < priv->texture_units->len; i++)
+    {
+      CoglTextureUnit *unit =
+        &g_array_index (priv->texture_units, CoglTextureUnit, i);
+
       g_object_unref (unit->matrix_stack);
     }
   g_array_free (priv->texture_units, TRUE);
@@ -467,6 +496,7 @@ cogl_driver_gl_class_init (CoglDriverGLClass *klass)
   driver_klass->context_init = cogl_driver_gl_context_init;
   driver_klass->get_vendor = cogl_driver_gl_get_gl_vendor;
   driver_klass->is_hardware_accelerated = cogl_driver_gl_is_hardware_accelerated;
+  driver_klass->clear_texture_units = cogl_driver_gl_clear_texture_units;
   driver_klass->get_graphics_reset_status = cogl_driver_gl_get_graphics_reset_status;
   driver_klass->create_framebuffer_driver = cogl_driver_gl_create_framebuffer_driver;
   driver_klass->flush_framebuffer_state = cogl_driver_gl_flush_framebuffer_state;

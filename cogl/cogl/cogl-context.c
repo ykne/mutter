@@ -37,6 +37,7 @@
 #include "cogl/cogl-context-private.h"
 #include "cogl/cogl-display-private.h"
 #include "cogl/cogl-renderer-private.h"
+#include "cogl/cogl-driver.h"
 #include "cogl/cogl-journal-private.h"
 #include "cogl/cogl-texture-private.h"
 #include "cogl/cogl-texture-2d-private.h"
@@ -121,6 +122,15 @@ cogl_context_dispose (GObject *object)
 
   g_clear_pointer (&context->pipeline_cache, _cogl_pipeline_cache_free);
   g_clear_pointer (&context->sampler_cache, _cogl_sampler_cache_free);
+
+  /* Drop any pipeline layers the driver still holds bound internally
+   * while display/renderer are still valid - otherwise a texture kept
+   * alive only by one of those (e.g. a closed window's texture-from-
+   * pixmap outliving its actor) gets disposed as a late side-effect of
+   * the driver's own dispose, by which point context->display below is
+   * already NULL and any X11/EGL cleanup that dispose tries to do
+   * crashes. */
+  cogl_driver_clear_texture_units (cogl_context_get_driver (context));
 
   g_clear_object (&context->display);
 

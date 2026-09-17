@@ -77,6 +77,20 @@ typedef struct _CoglDriverClass CoglDriverClass;
 COGL_EXPORT
 gboolean cogl_driver_is_hardware_accelerated (CoglDriver *driver);
 
+/**
+ * cogl_driver_clear_texture_units:
+ * @driver: a #CoglDriver
+ *
+ * Drops any pipeline layers the driver holds onto internally, releasing
+ * their textures. Meant to be called explicitly during context teardown
+ * while the context's display/renderer are still valid, so that a
+ * texture kept alive only by such a stale internal reference (e.g. a
+ * closed window's texture-from-pixmap) gets disposed safely rather than
+ * as a side-effect of the driver's own dispose running later.
+ */
+COGL_EXPORT
+void cogl_driver_clear_texture_units (CoglDriver *driver);
+
 COGL_EXPORT_TEST
 const char * cogl_driver_get_vendor (CoglDriver *driver);
 

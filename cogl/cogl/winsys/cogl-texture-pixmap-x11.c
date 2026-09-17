@@ -248,6 +248,22 @@ cogl_texture_pixmap_x11_dispose (GObject *object)
       return;
     }
 
+  /* Can happen if this object is only still alive because something
+   * else (e.g. a driver's internal "currently bound layer" tracking)
+   * held an extra reference past its window's normal lifetime, and
+   * that reference only gets dropped once full context teardown is
+   * already underway - by then ctx->display is already NULL. The X11
+   * display/EGL connection this would otherwise clean up against is
+   * already gone (or on its way out) in that case, so there's nothing
+   * live left to release explicitly - just drop our own in-process
+   * texture ref and let the parent finish. */
+  if (!ctx || !ctx->display)
+    {
+      g_clear_object (&tex_pixmap->tex);
+      G_OBJECT_CLASS (cogl_texture_pixmap_x11_parent_class)->dispose (object);
+      return;
+    }
+
   display = cogl_xlib_renderer_get_display (ctx->display->renderer);
 
   set_damage_object_internal (ctx, tex_pixmap, 0, 0);
