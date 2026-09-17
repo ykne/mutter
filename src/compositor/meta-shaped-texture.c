@@ -1458,7 +1458,29 @@ meta_shaped_texture_is_opaque (MetaShapedTexture *stex)
 
   multi_texture = stex->texture;
   if (!multi_texture)
-    return TRUE;
+    {
+      /* No texture yet (e.g. a freshly-mapped window whose backing
+       * texture-from-pixmap hasn't finished being created
+       * asynchronously): "opaque" is unknown, not established, so
+       * default to the SAFE answer here, matching the sibling
+       * meta_shaped_texture_has_alpha()'s own "not established yet"
+       * default a few lines up (which safely assumes "has alpha,
+       * needs blending"). Defaulting to TRUE ("opaque") instead let a
+       * still-texture-less override-redirect popup/tooltip pass
+       * meta_surface_actor_x11_should_unredirect()'s opacity check
+       * before its real ARGB content existed, permanently marking it
+       * "unredirected" (bypassing the compositor - and, with it,
+       * check_needs_reshape()/update_opaque_region() - entirely) for
+       * that window's whole lifetime, until some unrelated topmost-
+       * window change happened to un-redirect it again as a side
+       * effect. Every other caller of this function (shadow-drawing/
+       * clipping decisions here, Wayland occlusion-culling fast paths)
+       * only uses a FALSE result to skip an optimization / do the
+       * safer, more expensive thing for one brief moment before the
+       * window is even visible - harmless - so this default is safe
+       * to flip everywhere it's used. */
+      return FALSE;
+    }
 
   if (!meta_shaped_texture_has_alpha (stex))
     return TRUE;
