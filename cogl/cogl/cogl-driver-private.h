@@ -152,3 +152,11 @@ typedef enum /*< prefix=COGL_DRIVER_ERROR >*/
 
 uint32_t
 _cogl_driver_error_quark (void);
+
+/* Drops any pipeline layers @driver holds onto internally, releasing their
+ * textures. Called explicitly during context teardown while the context's
+ * display/renderer are still valid, so that a texture kept alive only by
+ * such a stale internal reference (e.g. a closed window's texture-from-
+ * pixmap) gets disposed safely rather than as a side-effect of the driver's
+ * own dispose running later. */
+void cogl_driver_clear_texture_units (CoglDriver *driver);

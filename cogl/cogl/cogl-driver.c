@@ -141,3 +141,12 @@ cogl_driver_set_feature (CoglDriver    *driver,
 
   COGL_FLAGS_SET (priv->features, feature, value);
 }
+
+void
+cogl_driver_clear_texture_units (CoglDriver *driver)
+{
+  CoglDriverClass *klass = COGL_DRIVER_GET_CLASS (driver);
+
+  if (klass->clear_texture_units)
+    klass->clear_texture_units (driver);
+}
