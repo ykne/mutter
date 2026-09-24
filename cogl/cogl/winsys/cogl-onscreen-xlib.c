@@ -31,6 +31,8 @@
 #include "cogl/cogl-context-private.h"
 #include "cogl/cogl-display-egl.h"
 #include "cogl/cogl-framebuffer-private.h"
+#include "cogl/cogl-frame-info-private.h"
+#include "cogl/cogl-onscreen-private.h"
 #include "cogl/cogl-renderer-egl.h"
 #include "cogl/cogl-renderer-private.h"
 #include "cogl/cogl-x11-onscreen.h"
@@ -189,6 +191,78 @@ cogl_onscreen_xlib_get_window_handles (CoglOnscreen *onscreen,
   return TRUE;
 }
 
+/* Unlike the native backends, X (and the EGL swap we do to it) gives no
+ * per-frame presentation feedback, so the frame is reported as synced and
+ * complete right after the swap. That has to happen from an idle rather
+ * than from inside the swap, since callers do not expect their frame
+ * callbacks to run re-entrantly from within cogl_onscreen_swap_*(). Without
+ * this Clutter's frame clock waits forever for the first frame to be
+ * presented and the stage never repaints. */
+typedef struct _FrameDone
+{
+  CoglOnscreen *onscreen;
+  CoglFrameInfo *info;
+} FrameDone;
+
+static gboolean
+notify_frame_done_cb (gpointer user_data)
+{
+  FrameDone *frame_done = user_data;
+
+  _cogl_onscreen_notify_frame_sync (frame_done->onscreen, frame_done->info);
+  _cogl_onscreen_notify_complete (frame_done->onscreen, frame_done->info);
+
+  g_object_unref (frame_done->info);
+  g_object_unref (frame_done->onscreen);
+  g_free (frame_done);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+queue_frame_done (CoglOnscreen  *onscreen,
+                  CoglFrameInfo *info)
+{
+  FrameDone *frame_done = g_new0 (FrameDone, 1);
+
+  frame_done->onscreen = g_object_ref (onscreen);
+  frame_done->info = g_object_ref (info);
+  g_idle_add_full (G_PRIORITY_DEFAULT, notify_frame_done_cb, frame_done, NULL);
+}
+
+static gboolean
+cogl_onscreen_xlib_swap_buffers_with_damage (CoglOnscreen    *onscreen,
+                                             const MtkRegion *region,
+                                             CoglFrameInfo   *info,
+                                             gpointer         user_data)
+{
+  CoglOnscreenClass *parent_class =
+    COGL_ONSCREEN_CLASS (cogl_onscreen_xlib_parent_class);
+
+  if (!parent_class->swap_buffers_with_damage (onscreen, region, info,
+                                               user_data))
+    return FALSE;
+
+  queue_frame_done (onscreen, info);
+  return TRUE;
+}
+
+static gboolean
+cogl_onscreen_xlib_swap_region (CoglOnscreen    *onscreen,
+                                const MtkRegion *region,
+                                CoglFrameInfo   *info,
+                                gpointer         user_data)
+{
+  CoglOnscreenClass *parent_class =
+    COGL_ONSCREEN_CLASS (cogl_onscreen_xlib_parent_class);
+
+  if (!parent_class->swap_region (onscreen, region, info, user_data))
+    return FALSE;
+
+  queue_frame_done (onscreen, info);
+  return TRUE;
+}
+
 static void
 cogl_onscreen_xlib_dispose (GObject *object)
 {
@@ -285,4 +359,7 @@ cogl_onscreen_xlib_class_init (CoglOnscreenXlibClass *klass)
 
   framebuffer_class->allocate = cogl_onscreen_xlib_allocate;
   onscreen_class->get_window_handles = cogl_onscreen_xlib_get_window_handles;
+  onscreen_class->swap_buffers_with_damage =
+    cogl_onscreen_xlib_swap_buffers_with_damage;
+  onscreen_class->swap_region = cogl_onscreen_xlib_swap_region;
 }

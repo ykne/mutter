@@ -153,7 +153,7 @@ meta_stage_x11_nested_finish_frame (ClutterStageWindow *stage_window,
   CoglFramebuffer *onscreen = COGL_FRAMEBUFFER (stage_x11->onscreen);
   CoglContext *context = cogl_framebuffer_get_context (onscreen);
   GList *l;
-  CoglFrameInfo *frame_info;
+  g_autoptr (CoglFrameInfo) frame_info = NULL;
 
   if (!stage_nested->pipeline)
     stage_nested->pipeline = cogl_pipeline_new (clutter_backend->cogl_context);
@@ -184,6 +184,7 @@ meta_stage_x11_nested_finish_frame (ClutterStageWindow *stage_window,
    * NULL damage region swaps the whole buffer. */
   frame_info = cogl_frame_info_new (COGL_ONSCREEN (stage_x11->onscreen),
                                     0, frame->frame_count);
+  clutter_frame_take_cogl_frame_info (frame, g_object_ref (frame_info));
   cogl_onscreen_swap_buffers_with_damage (COGL_ONSCREEN (stage_x11->onscreen),
                                           NULL, frame_info, frame);
 
