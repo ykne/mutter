@@ -871,6 +871,40 @@ on_window_decorated_changed (MetaWindow        *window,
 
   xwindow = meta_window_x11_get_toplevel_xwindow (window);
   meta_compositor_x11_grab_window_keys (compositor_x11, xwindow);
+
+  /* The passive button grabs move along with the effective toplevel too.
+   * They are taken when the window is added, before its frame exists, so
+   * without this they stay on the client window: a click in the client area
+   * still hits them, but a click on the frame (title bar, borders), which is
+   * a separate X window owned by the frames client and the parent of the
+   * client window, never does - so it neither focuses nor raises the window.
+   * Click-to-focus mode used to hide this, because losing focus re-grabs on
+   * the (by then framed) toplevel, but with sloppy/mouse focus the
+   * focus-click grab is never re-established. */
+  if (old_effective_toplevel != None && old_effective_toplevel != xwindow)
+    {
+      if (window == compositor_x11->focus_window)
+        {
+          MetaCompositor *compositor = META_COMPOSITOR (compositor_x11);
+          MetaDisplay *display = meta_compositor_get_display (compositor);
+          int modmask = meta_display_get_compositor_modifiers (display);
+
+          if (modmask != 0)
+            {
+              meta_change_buttons_grab (compositor_x11, old_effective_toplevel,
+                                        FALSE, META_GRAB_MODE_ASYNC, modmask);
+              meta_change_buttons_grab (compositor_x11, xwindow,
+                                        TRUE, META_GRAB_MODE_ASYNC, modmask);
+            }
+        }
+
+      if (meta_window_x11_get_focus_click_grab_xwindow (window) != None)
+        {
+          /* The ungrab targets the window the grab was actually taken on */
+          meta_compositor_x11_ungrab_focus_window_button (compositor_x11, window);
+          meta_compositor_x11_grab_focus_window_button (compositor_x11, window);
+        }
+    }
 }
 
 static void
