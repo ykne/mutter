@@ -2,16 +2,16 @@
 %global gobject_introspection_version 1.41.4
 %global gtk3_version 3.19.8
 %global gtk4_version 4.14.0
-%global gsettings_desktop_schemas_version 47~beta
+%global gsettings_desktop_schemas_version 51~alpha
 %global libdrm_version 2.4.118
-%global libinput_version 1.27.0
+%global libinput_version 1.31.0
 %global pixman_version 0.42
-%global pipewire_version 1.2.7
+%global pipewire_version 1.6.0
 %global lcms2_version 2.6
 %global colord_version 1.4.5
 %global libei_version 1.3.901
-%global mutter_api_version 18
-%global wayland_protocols_version 1.45
+%global mutter_api_version 51
+%global wayland_protocols_version 1.48
 %global wayland_server_version 1.24
 
 %global major_version %%(echo %{version} | cut -d '.' -f1 | cut -d '~' -f 1)
@@ -19,7 +19,7 @@
 
 Name:          mutter
 Epoch:         1
-Version:       50.5
+Version:       51.0
 Release:       %autorelease
 Summary:       Window and compositing manager based on Clutter
 
@@ -165,7 +165,7 @@ Viewer for nested mutter instances.
 %autosetup -S git -n %{name}-%{tarball_version}
 
 %build
-%meson -Degl_device=true -Dglx=false
+%meson -Dglx=false
 %meson_build
 
 %install
@@ -193,6 +193,7 @@ Viewer for nested mutter instances.
 %files common
 %{_datadir}/GConf/gsettings/mutter-schemas.convert
 %{_datadir}/glib-2.0/schemas/org.gnome.mutter.gschema.xml
+%{_datadir}/glib-2.0/schemas/org.gnome.mutter.experimental.gschema.xml
 %{_datadir}/glib-2.0/schemas/org.gnome.mutter.wayland.gschema.xml
 %{_datadir}/gnome-control-center/keybindings/50-mutter-*.xml
 %{_udevrulesdir}/61-mutter.rules
