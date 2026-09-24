@@ -184,6 +184,7 @@ enum
   CLOSING,
   INIT_XSERVER,
   WINDOW_VISIBILITY_UPDATED,
+  GL_VIDEO_MEMORY_PURGED,
   LAST_SIGNAL
 };
 
@@ -512,6 +513,16 @@ meta_display_class_init (MetaDisplayClass *klass)
                   0, g_signal_accumulator_first_wins,
                   NULL, NULL,
                   G_TYPE_BOOLEAN, 1, G_TYPE_TASK);
+
+  /* Restored alongside the X11 backend: the X11 surface actors listen for
+   * this to rebuild their pixmap textures after a GPU context reset. */
+  display_signals[GL_VIDEO_MEMORY_PURGED] =
+    g_signal_new ("gl-video-memory-purged",
+                  G_TYPE_FROM_CLASS (klass),
+                  G_SIGNAL_RUN_LAST,
+                  0,
+                  NULL, NULL, NULL,
+                  G_TYPE_NONE, 0);
 
   display_signals[WINDOW_VISIBILITY_UPDATED] =
     g_signal_new ("window-visibility-updated",

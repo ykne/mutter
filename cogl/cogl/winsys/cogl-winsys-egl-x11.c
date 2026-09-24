@@ -453,6 +453,11 @@ cogl_display_egl_x11_class_init (CoglDisplayEglX11Class *klass)
   display_egl_class->choose_config = cogl_display_egl_x11_choose_config;
   display_egl_class->context_created = cogl_display_egl_x11_context_created;
   display_egl_class->cleanup_context = cogl_display_egl_x11_cleanup_context;
+
+  /* The X visual of every window (including the dummy one) comes from the
+   * chosen EGLConfig, so one is needed even when the EGL driver could create
+   * the context without one. */
+  display_egl_class->needs_config = TRUE;
 }
 
 CoglDisplay *

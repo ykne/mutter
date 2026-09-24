@@ -334,6 +334,24 @@ meta_renderer_egl_set_renderer_gpu_data (MetaRendererEgl           *renderer_egl
   renderer_egl->renderer_gpu_data = renderer_gpu_data;
 }
 
+/* Backend-independent code (screen casting) needs the render device the cogl
+ * renderer draws with, if any. Only the native backend's cogl renderer has
+ * one: under the X11 backend it is a CoglRendererEglX11 and there is no DRM
+ * render device to allocate DMA buffers on, so this returns NULL. */
+MetaRenderDevice *
+meta_renderer_egl_find_render_device (CoglRenderer *cogl_renderer)
+{
+  MetaRendererNativeGpuData *renderer_gpu_data;
+
+  if (!META_IS_RENDERER_EGL (cogl_renderer))
+    return NULL;
+
+  renderer_gpu_data =
+    meta_renderer_egl_get_renderer_gpu_data (META_RENDERER_EGL (cogl_renderer));
+
+  return renderer_gpu_data->render_device;
+}
+
 MetaRendererNativeGpuData *
 meta_renderer_egl_get_renderer_gpu_data (MetaRendererEgl *renderer_egl)
 {
