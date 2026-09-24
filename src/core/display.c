@@ -3802,3 +3802,9 @@ meta_display_handle_sticky_mouse_focus_event (MetaDisplay        *display,
       STICKY_FOCUS_UNSTICK_DISTANCE)
     invalidate_sticky_mouse_focus (display);
 }
+
+gboolean
+meta_grab_op_is_keyboard (MetaGrabOp op)
+{
+  return (op & META_GRAB_OP_WINDOW_FLAG_KEYBOARD) != 0;
+}

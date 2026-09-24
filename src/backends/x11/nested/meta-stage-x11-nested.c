@@ -179,11 +179,13 @@ meta_stage_x11_nested_finish_frame (ClutterStageWindow *stage_window,
       draw_view (stage_nested, renderer_view, texture);
     }
 
-  /* cogl_onscreen_egl_maybe_create_timestamp_query() no longer exists -
-   * timestamp queries are handled internally by the winsys now, so
-   * creating the frame info and swapping is all that's needed here. */
-  frame_info = cogl_frame_info_new (context, 0, frame->frame_count);
-  cogl_onscreen_swap_buffers (stage_x11->onscreen, frame_info, frame);
+  /* Timestamp queries are handled internally by the EGL onscreen, so
+   * creating the frame info and swapping is all that's needed here. A
+   * NULL damage region swaps the whole buffer. */
+  frame_info = cogl_frame_info_new (COGL_ONSCREEN (stage_x11->onscreen),
+                                    0, frame->frame_count);
+  cogl_onscreen_swap_buffers_with_damage (COGL_ONSCREEN (stage_x11->onscreen),
+                                          NULL, frame_info, frame);
 
   if (!clutter_frame_has_result (frame))
     clutter_frame_set_result (frame, CLUTTER_FRAME_RESULT_IDLE);

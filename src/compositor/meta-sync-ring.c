@@ -40,7 +40,6 @@
 #include "clutter/clutter.h"
 #include "cogl/cogl.h"
 #include "cogl/cogl-context-private.h"
-#include "cogl/cogl-display-private.h"
 #include "meta/util.h"
 
 /* Theory of operation:
@@ -138,7 +137,7 @@ load_gl_symbol (CoglContext *ctx,
                 const char  *name,
                 void       **func)
 {
-  *func = cogl_renderer_get_proc_address (ctx->display->renderer, name);
+  *func = cogl_renderer_get_proc_address (cogl_context_get_renderer (ctx), name);
   if (!*func)
     {
       meta_topic (META_DEBUG_RENDER,

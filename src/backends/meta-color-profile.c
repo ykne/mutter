@@ -565,3 +565,15 @@ meta_color_calibration_free (MetaColorCalibration *color_calibration)
   g_free (color_calibration->brightness_profile);
   g_free (color_calibration);
 }
+
+const uint8_t *
+meta_color_profile_get_data (MetaColorProfile *color_profile)
+{
+  return g_bytes_get_data (color_profile->bytes, NULL);
+}
+
+size_t
+meta_color_profile_get_data_size (MetaColorProfile *color_profile)
+{
+  return g_bytes_get_size (color_profile->bytes);
+}

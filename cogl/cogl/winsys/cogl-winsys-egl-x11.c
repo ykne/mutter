@@ -41,7 +41,6 @@
 #include "cogl/cogl-xlib-renderer.h"
 #include "cogl/cogl-framebuffer-private.h"
 #include "cogl/cogl-onscreen-private.h"
-#include "cogl/cogl-display-private.h"
 #include "cogl/cogl-renderer-private.h"
 #include "cogl/cogl-context-private.h"
 #include "cogl/winsys/cogl-texture-pixmap-x11-private.h"
@@ -51,7 +50,10 @@
 #include "cogl/winsys/cogl-onscreen-egl.h"
 #include "cogl/winsys/cogl-onscreen-xlib.h"
 #include "cogl/winsys/cogl-winsys-egl-x11-private.h"
-#include "cogl/winsys/cogl-winsys-egl.h"
+#include "cogl/cogl-context-egl.h"
+#include "cogl/cogl-display-egl.h"
+#include "cogl/cogl-renderer-egl.h"
+#include "cogl/winsys/cogl-winsys.h"
 
 /* EGL_KHR_image_pixmap function pointers. Cogl's generic EGL image
  * helpers were dropped upstream along with the rest of X11 support,
@@ -82,23 +84,23 @@ ensure_egl_image_khr_resolved (void)
   image_khr_resolved = TRUE;
 }
 
-struct _CoglWinsysEglX11
+struct _CoglRendererEglX11
 {
-  CoglWinsysEGL parent;
-
-  /* Not owned: CoglRenderer owns us (via cogl_renderer_set_custom_winsys),
-   * not the other way around. Kept only so dispose() can tear down the
-   * Xlib connection it opened in renderer_connect(). */
-  CoglRenderer *renderer;
+  CoglRendererEGL parent;
 };
 
-G_DEFINE_FINAL_TYPE (CoglWinsysEglX11, cogl_winsys_egl_x11,
-                    COGL_TYPE_WINSYS_EGL)
+G_DEFINE_FINAL_TYPE (CoglRendererEglX11, cogl_renderer_egl_x11,
+                     COGL_TYPE_RENDERER_EGL)
 
-typedef struct _CoglDisplayXlib
+struct _CoglDisplayEglX11
 {
+  CoglDisplayEGL parent;
+
   Window dummy_xwin;
-} CoglDisplayXlib;
+};
+
+G_DEFINE_FINAL_TYPE (CoglDisplayEglX11, cogl_display_egl_x11,
+                     COGL_TYPE_DISPLAY_EGL)
 
 typedef struct _CoglTexturePixmapEGL
 {
@@ -107,12 +109,20 @@ typedef struct _CoglTexturePixmapEGL
   gboolean bind_tex_image_queued;
 } CoglTexturePixmapEGL;
 
+static EGLDisplay
+context_get_edisplay (CoglContext *context)
+{
+  CoglRenderer *renderer = cogl_context_get_renderer (context);
+
+  return cogl_renderer_egl_get_edisplay (COGL_RENDERER_EGL (renderer));
+}
+
 static CoglOnscreen *
 find_onscreen_for_xid (CoglContext *context, uint32_t xid)
 {
   GList *l;
 
-  for (l = context->framebuffers; l; l = l->next)
+  for (l = cogl_context_get_framebuffers (context); l; l = l->next)
     {
       CoglFramebuffer *framebuffer = l->data;
       CoglOnscreen *onscreen;
@@ -121,7 +131,8 @@ find_onscreen_for_xid (CoglContext *context, uint32_t xid)
         continue;
 
       onscreen = COGL_ONSCREEN (framebuffer);
-      if (cogl_onscreen_xlib_is_for_window (onscreen, (Window) xid))
+      if (COGL_IS_ONSCREEN_XLIB (onscreen) &&
+          cogl_onscreen_xlib_is_for_window (onscreen, (Window) xid))
         return onscreen;
     }
 
@@ -143,34 +154,32 @@ notify_resize (CoglContext *context,
   cogl_onscreen_xlib_resize (onscreen, width, height);
 }
 
+/* The filter outlives the context it was registered for (it lives on
+ * the renderer), so it only holds a weak reference to it. */
+typedef struct _CoglEventFilterData
+{
+  GWeakRef context;
+} CoglEventFilterData;
+
 static CoglFilterReturn
 event_filter_cb (XEvent *xevent, void *data)
 {
-  CoglContext *context = data;
+  CoglEventFilterData *filter_data = data;
+  g_autoptr (CoglContext) context = g_weak_ref_get (&filter_data->context);
 
+  if (!context)
+    return COGL_FILTER_CONTINUE;
+
+  /* Expose events used to be turned into onscreen "dirty" events here.
+   * Upstream dropped the whole dirty-event queue (nothing but the X11
+   * backend ever produced them, and nothing consumes them), so there is
+   * nothing left to notify. */
   if (xevent->type == ConfigureNotify)
     {
       notify_resize (context,
                      xevent->xconfigure.window,
                      xevent->xconfigure.width,
                      xevent->xconfigure.height);
-    }
-  else if (xevent->type == Expose)
-    {
-      CoglOnscreen *onscreen =
-        find_onscreen_for_xid (context, xevent->xexpose.window);
-
-      if (onscreen)
-        {
-          MtkRectangle info;
-
-          info.x = xevent->xexpose.x;
-          info.y = xevent->xexpose.y;
-          info.width = xevent->xexpose.width;
-          info.height = xevent->xexpose.height;
-
-          _cogl_onscreen_queue_dirty (onscreen, &info);
-        }
     }
 
   return COGL_FILTER_CONTINUE;
@@ -180,18 +189,17 @@ XVisualInfo *
 cogl_display_xlib_get_visual_info (CoglDisplay *display,
                                    EGLConfig    egl_config)
 {
-  CoglXlibRenderer *xlib_renderer =
-    _cogl_xlib_renderer_get_data (display->renderer);
-  CoglRendererEGL *egl_renderer =
-    cogl_renderer_get_winsys_data (display->renderer);
+  CoglRenderer *renderer = cogl_display_get_renderer (display);
+  CoglXlibRenderer *xlib_renderer = _cogl_xlib_renderer_get_data (renderer);
+  EGLDisplay edpy =
+    cogl_renderer_egl_get_edisplay (COGL_RENDERER_EGL (renderer));
   XVisualInfo visinfo_template;
   int template_mask = 0;
   XVisualInfo *visinfo = NULL;
   int visinfos_count;
   EGLint visualid, red_size, green_size, blue_size, alpha_size;
 
-  eglGetConfigAttrib (egl_renderer->edpy, egl_config,
-                      EGL_NATIVE_VISUAL_ID, &visualid);
+  eglGetConfigAttrib (edpy, egl_config, EGL_NATIVE_VISUAL_ID, &visualid);
 
   if (visualid != 0)
     {
@@ -203,14 +211,10 @@ cogl_display_xlib_get_visual_info (CoglDisplay *display,
       /* some EGL drivers don't implement the EGL_NATIVE_VISUAL_ID
        * attribute, so attempt to find the closest match. */
 
-      eglGetConfigAttrib (egl_renderer->edpy, egl_config,
-                          EGL_RED_SIZE, &red_size);
-      eglGetConfigAttrib (egl_renderer->edpy, egl_config,
-                          EGL_GREEN_SIZE, &green_size);
-      eglGetConfigAttrib (egl_renderer->edpy, egl_config,
-                          EGL_BLUE_SIZE, &blue_size);
-      eglGetConfigAttrib (egl_renderer->edpy, egl_config,
-                          EGL_ALPHA_SIZE, &alpha_size);
+      eglGetConfigAttrib (edpy, egl_config, EGL_RED_SIZE, &red_size);
+      eglGetConfigAttrib (edpy, egl_config, EGL_GREEN_SIZE, &green_size);
+      eglGetConfigAttrib (edpy, egl_config, EGL_BLUE_SIZE, &blue_size);
+      eglGetConfigAttrib (edpy, egl_config, EGL_ALPHA_SIZE, &alpha_size);
 
       visinfo_template.depth = red_size + green_size + blue_size + alpha_size;
       template_mask |= VisualDepthMask;
@@ -228,30 +232,22 @@ cogl_display_xlib_get_visual_info (CoglDisplay *display,
 }
 
 static gboolean
-cogl_winsys_egl_x11_renderer_connect (CoglWinsys   *winsys,
-                                      CoglRenderer *renderer,
-                                      GError      **error)
+cogl_renderer_egl_x11_connect (CoglRenderer  *renderer,
+                               GError       **error)
 {
-  CoglWinsysClass *parent_class;
-  CoglRendererEGL *egl_renderer;
+  CoglRendererClass *parent_class =
+    COGL_RENDERER_CLASS (cogl_renderer_egl_x11_parent_class);
   CoglXlibRenderer *xlib_renderer;
-
-  COGL_WINSYS_EGL_X11 (winsys)->renderer = renderer;
-
-  cogl_renderer_set_winsys_data (renderer, g_new0 (CoglRendererEGL, 1), g_free);
-  egl_renderer = cogl_renderer_get_winsys_data (renderer);
-  xlib_renderer = _cogl_xlib_renderer_get_data (renderer);
-
-  egl_renderer->sync = EGL_NO_SYNC_KHR;
-  egl_renderer->needs_config = TRUE;
 
   if (!_cogl_xlib_renderer_connect (renderer, error))
     return FALSE;
 
-  egl_renderer->edpy = eglGetDisplay ((EGLNativeDisplayType) xlib_renderer->xdpy);
+  xlib_renderer = _cogl_xlib_renderer_get_data (renderer);
 
-  parent_class = COGL_WINSYS_CLASS (cogl_winsys_egl_x11_parent_class);
-  if (!parent_class->renderer_connect (winsys, renderer, error))
+  cogl_renderer_egl_set_edisplay (COGL_RENDERER_EGL (renderer),
+                                  eglGetDisplay ((EGLNativeDisplayType) xlib_renderer->xdpy));
+
+  if (!parent_class->connect (renderer, error))
     {
       _cogl_xlib_renderer_disconnect (renderer);
       return FALSE;
@@ -260,10 +256,44 @@ cogl_winsys_egl_x11_renderer_connect (CoglWinsys   *winsys,
   return TRUE;
 }
 
+static void
+cogl_renderer_egl_x11_dispose (GObject *object)
+{
+  CoglRenderer *renderer = COGL_RENDERER (object);
+
+  /* The parent's dispose() eglTerminate()s the EGLDisplay, which was
+   * created from our Xlib connection, so the connection must stay open
+   * until after it has run. */
+  G_OBJECT_CLASS (cogl_renderer_egl_x11_parent_class)->dispose (object);
+
+  _cogl_xlib_renderer_disconnect (renderer);
+}
+
+static void
+cogl_renderer_egl_x11_init (CoglRendererEglX11 *renderer_egl_x11)
+{
+}
+
+static void
+cogl_renderer_egl_x11_class_init (CoglRendererEglX11Class *klass)
+{
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+  CoglRendererClass *renderer_class = COGL_RENDERER_CLASS (klass);
+
+  object_class->dispose = cogl_renderer_egl_x11_dispose;
+
+  renderer_class->connect = cogl_renderer_egl_x11_connect;
+}
+
+CoglRenderer *
+cogl_renderer_egl_x11_new (void)
+{
+  return g_object_new (COGL_TYPE_RENDERER_EGL_X11, NULL);
+}
+
 static int
-cogl_winsys_egl_x11_add_config_attributes (CoglWinsysEGL *winsys,
-                                           CoglDisplay   *display,
-                                           EGLint        *attributes)
+cogl_display_egl_x11_add_config_attributes (CoglDisplayEGL *display_egl,
+                                            EGLint         *attributes)
 {
   int i = 0;
 
@@ -274,18 +304,18 @@ cogl_winsys_egl_x11_add_config_attributes (CoglWinsysEGL *winsys,
 }
 
 static gboolean
-cogl_winsys_egl_x11_choose_config (CoglWinsysEGL  *winsys,
-                                   CoglDisplay    *display,
-                                   EGLint         *attributes,
-                                   EGLConfig      *out_config,
-                                   GError        **error)
+cogl_display_egl_x11_choose_config (CoglDisplayEGL  *display_egl,
+                                    EGLint          *attributes,
+                                    EGLConfig       *out_config,
+                                    GError         **error)
 {
-  CoglRenderer *renderer = display->renderer;
-  CoglRendererEGL *egl_renderer = cogl_renderer_get_winsys_data (renderer);
+  CoglRenderer *renderer = cogl_display_get_renderer (COGL_DISPLAY (display_egl));
+  EGLDisplay edpy =
+    cogl_renderer_egl_get_edisplay (COGL_RENDERER_EGL (renderer));
   EGLint config_count = 0;
   EGLBoolean status;
 
-  status = eglChooseConfig (egl_renderer->edpy,
+  status = eglChooseConfig (edpy,
                             attributes,
                             out_config, 1,
                             &config_count);
@@ -301,80 +331,22 @@ cogl_winsys_egl_x11_choose_config (CoglWinsysEGL  *winsys,
 }
 
 static gboolean
-cogl_winsys_egl_x11_display_setup (CoglWinsys   *winsys,
-                                   CoglDisplay  *display,
-                                   GError      **error)
+cogl_display_egl_x11_context_created (CoglDisplayEGL  *display_egl,
+                                      GError         **error)
 {
-  CoglDisplayEGL *egl_display;
-  CoglDisplayXlib *xlib_display;
-  CoglWinsysClass *parent_class = COGL_WINSYS_CLASS (cogl_winsys_egl_x11_parent_class);
-
-  if (!parent_class->display_setup (winsys, display, error))
-    return FALSE;
-
-  egl_display = display->winsys;
-  xlib_display = g_new0 (CoglDisplayXlib, 1);
-  egl_display->platform = xlib_display;
-
-  return TRUE;
-}
-
-static void
-cogl_winsys_egl_x11_display_destroy (CoglWinsys  *winsys,
-                                     CoglDisplay *display)
-{
-  CoglDisplayEGL *egl_display = display->winsys;
-
-  /* The parent's display_destroy() calls cleanup_context(), which
-   * dispatches back into this file's cogl_winsys_egl_x11_cleanup_context()
-   * - that function dereferences egl_display->platform, so it must run
-   * before we free it here, not after. */
-  COGL_WINSYS_CLASS (cogl_winsys_egl_x11_parent_class)->display_destroy (winsys,
-                                                                         display);
-
-  g_clear_pointer (&egl_display->platform, g_free);
-}
-
-static gboolean
-cogl_winsys_egl_x11_context_init (CoglWinsys   *winsys,
-                                  CoglContext  *context,
-                                  GError      **error)
-{
-  CoglWinsysClass *parent_class = COGL_WINSYS_CLASS (cogl_winsys_egl_x11_parent_class);
-
-  if (!parent_class->context_init (winsys, context, error))
-    return FALSE;
-
-  /* We manually queue dirty events in response to Expose events from X
-   * (see event_filter_cb() below) - upstream's COGL_PRIVATE_FEATURE_DIRTY_EVENTS
-   * flag that used to advertise this no longer exists (it was X11-only
-   * and dropped along with the rest of X11 support), but nothing else in
-   * the current codebase gates behavior on it, so there's nothing to
-   * replace it with. */
-  _cogl_renderer_add_native_filter (context->display->renderer,
-                                    (CoglNativeFilterFunc) event_filter_cb,
-                                    context);
-
-  return TRUE;
-}
-
-static gboolean
-cogl_winsys_egl_x11_context_created (CoglWinsysEGL  *winsys,
-                                     CoglDisplay    *display,
-                                     GError        **error)
-{
-  CoglRenderer *renderer = display->renderer;
-  CoglDisplayEGL *egl_display = display->winsys;
-  CoglRendererEGL *egl_renderer = cogl_renderer_get_winsys_data (renderer);
-  CoglXlibRenderer *xlib_renderer =
-    _cogl_xlib_renderer_get_data (renderer);
-  CoglDisplayXlib *xlib_display = egl_display->platform;
+  CoglDisplay *display = COGL_DISPLAY (display_egl);
+  CoglDisplayEglX11 *display_egl_x11 = COGL_DISPLAY_EGL_X11 (display_egl);
+  CoglRenderer *renderer = cogl_display_get_renderer (display);
+  CoglRendererEGL *renderer_egl = COGL_RENDERER_EGL (renderer);
+  EGLDisplay edpy = cogl_renderer_egl_get_edisplay (renderer_egl);
+  CoglXlibRenderer *xlib_renderer = _cogl_xlib_renderer_get_data (renderer);
+  EGLConfig egl_config = cogl_display_egl_get_egl_config (display_egl);
+  EGLSurface dummy_surface = cogl_display_egl_get_dummy_surface (display_egl);
   XVisualInfo *xvisinfo;
   XSetWindowAttributes attrs;
   const char *error_message;
 
-  xvisinfo = cogl_display_xlib_get_visual_info (display,
-                                                egl_display->egl_config);
+  xvisinfo = cogl_display_xlib_get_visual_info (display, egl_config);
   if (xvisinfo == NULL)
     {
       error_message = "Unable to find suitable X visual";
@@ -388,10 +360,10 @@ cogl_winsys_egl_x11_context_created (CoglWinsysEGL  *winsys,
                                     AllocNone);
   attrs.border_pixel = 0;
 
-  if ((egl_renderer->private_features &
-       COGL_EGL_WINSYS_FEATURE_SURFACELESS_CONTEXT) == 0)
+  if (!cogl_renderer_egl_has_feature (renderer_egl,
+                                      COGL_EGL_WINSYS_FEATURE_SURFACELESS_CONTEXT))
     {
-      xlib_display->dummy_xwin =
+      display_egl_x11->dummy_xwin =
         XCreateWindow (xlib_renderer->xdpy,
                        DefaultRootWindow (xlib_renderer->xdpy),
                        -100, -100, 1, 1,
@@ -404,13 +376,14 @@ cogl_winsys_egl_x11_context_created (CoglWinsysEGL  *winsys,
                        CWBorderPixel,
                        &attrs);
 
-      egl_display->dummy_surface =
-        eglCreateWindowSurface (egl_renderer->edpy,
-                                egl_display->egl_config,
-                                (EGLNativeWindowType) xlib_display->dummy_xwin,
+      dummy_surface =
+        eglCreateWindowSurface (edpy,
+                                egl_config,
+                                (EGLNativeWindowType) display_egl_x11->dummy_xwin,
                                 NULL);
+      cogl_display_egl_set_dummy_surface (display_egl, dummy_surface);
 
-      if (egl_display->dummy_surface == EGL_NO_SURFACE)
+      if (dummy_surface == EGL_NO_SURFACE)
         {
           error_message = "Unable to create an EGL surface";
           XFree (xvisinfo);
@@ -420,12 +393,12 @@ cogl_winsys_egl_x11_context_created (CoglWinsysEGL  *winsys,
 
   g_clear_pointer (&xvisinfo, XFree);
 
-  if (!_cogl_winsys_egl_make_current (display,
-                                      egl_display->dummy_surface,
-                                      egl_display->dummy_surface,
-                                      egl_display->egl_context))
+  if (!cogl_display_egl_make_current (display_egl,
+                                      dummy_surface,
+                                      dummy_surface,
+                                      cogl_display_egl_get_egl_context (display_egl)))
     {
-      if (egl_display->dummy_surface == EGL_NO_SURFACE)
+      if (dummy_surface == EGL_NO_SURFACE)
         error_message = "Unable to eglMakeCurrent with no surface";
       else
         error_message = "Unable to eglMakeCurrent with dummy surface";
@@ -442,72 +415,72 @@ fail:
 }
 
 static void
-cogl_winsys_egl_x11_cleanup_context (CoglWinsysEGL *winsys,
-                                     CoglDisplay   *display)
+cogl_display_egl_x11_cleanup_context (CoglDisplayEGL *display_egl)
 {
-  CoglDisplayEGL *egl_display = display->winsys;
-  CoglDisplayXlib *xlib_display = egl_display->platform;
-  CoglRenderer *renderer = display->renderer;
-  CoglXlibRenderer *xlib_renderer =
-    _cogl_xlib_renderer_get_data (renderer);
-  CoglRendererEGL *egl_renderer = cogl_renderer_get_winsys_data (renderer);
+  CoglDisplayEglX11 *display_egl_x11 = COGL_DISPLAY_EGL_X11 (display_egl);
+  CoglRenderer *renderer =
+    cogl_display_get_renderer (COGL_DISPLAY (display_egl));
+  EGLDisplay edpy =
+    cogl_renderer_egl_get_edisplay (COGL_RENDERER_EGL (renderer));
+  CoglXlibRenderer *xlib_renderer = _cogl_xlib_renderer_get_data (renderer);
+  EGLSurface dummy_surface = cogl_display_egl_get_dummy_surface (display_egl);
 
-  if (egl_display->dummy_surface != EGL_NO_SURFACE)
+  if (dummy_surface != EGL_NO_SURFACE)
     {
-      eglDestroySurface (egl_renderer->edpy, egl_display->dummy_surface);
-      egl_display->dummy_surface = EGL_NO_SURFACE;
+      eglDestroySurface (edpy, dummy_surface);
+      cogl_display_egl_set_dummy_surface (display_egl, EGL_NO_SURFACE);
     }
 
-  if (xlib_display->dummy_xwin)
+  if (display_egl_x11->dummy_xwin)
     {
-      XDestroyWindow (xlib_renderer->xdpy, xlib_display->dummy_xwin);
-      xlib_display->dummy_xwin = None;
+      XDestroyWindow (xlib_renderer->xdpy, display_egl_x11->dummy_xwin);
+      display_egl_x11->dummy_xwin = None;
     }
 }
 
 static void
-cogl_winsys_egl_x11_dispose (GObject *object)
-{
-  CoglWinsysEglX11 *self = COGL_WINSYS_EGL_X11 (object);
-
-  if (self->renderer)
-    {
-      CoglRendererEGL *egl_renderer =
-        cogl_renderer_get_winsys_data (self->renderer);
-
-      if (egl_renderer && egl_renderer->edpy)
-        eglTerminate (egl_renderer->edpy);
-
-      _cogl_xlib_renderer_disconnect (self->renderer);
-      self->renderer = NULL;
-    }
-
-  G_OBJECT_CLASS (cogl_winsys_egl_x11_parent_class)->dispose (object);
-}
-
-static void
-cogl_winsys_egl_x11_init (CoglWinsysEglX11 *winsys)
+cogl_display_egl_x11_init (CoglDisplayEglX11 *display_egl_x11)
 {
 }
 
 static void
-cogl_winsys_egl_x11_class_init (CoglWinsysEglX11Class *klass)
+cogl_display_egl_x11_class_init (CoglDisplayEglX11Class *klass)
 {
-  GObjectClass *object_class = G_OBJECT_CLASS (klass);
-  CoglWinsysClass *winsys_class = COGL_WINSYS_CLASS (klass);
-  CoglWinsysEGLClass *winsys_egl_class = COGL_WINSYS_EGL_CLASS (klass);
+  CoglDisplayEGLClass *display_egl_class = COGL_DISPLAY_EGL_CLASS (klass);
 
-  object_class->dispose = cogl_winsys_egl_x11_dispose;
+  display_egl_class->add_config_attributes =
+    cogl_display_egl_x11_add_config_attributes;
+  display_egl_class->choose_config = cogl_display_egl_x11_choose_config;
+  display_egl_class->context_created = cogl_display_egl_x11_context_created;
+  display_egl_class->cleanup_context = cogl_display_egl_x11_cleanup_context;
+}
 
-  winsys_class->renderer_connect = cogl_winsys_egl_x11_renderer_connect;
-  winsys_class->display_setup = cogl_winsys_egl_x11_display_setup;
-  winsys_class->display_destroy = cogl_winsys_egl_x11_display_destroy;
-  winsys_class->context_init = cogl_winsys_egl_x11_context_init;
+CoglDisplay *
+cogl_display_egl_x11_new (CoglRenderer *renderer)
+{
+  return g_object_new (COGL_TYPE_DISPLAY_EGL_X11,
+                       "renderer", renderer,
+                       NULL);
+}
 
-  winsys_egl_class->add_config_attributes = cogl_winsys_egl_x11_add_config_attributes;
-  winsys_egl_class->choose_config = cogl_winsys_egl_x11_choose_config;
-  winsys_egl_class->context_created = cogl_winsys_egl_x11_context_created;
-  winsys_egl_class->cleanup_context = cogl_winsys_egl_x11_cleanup_context;
+CoglContext *
+cogl_context_egl_x11_new (CoglDisplay  *display,
+                          GError      **error)
+{
+  CoglContext *context;
+  CoglEventFilterData *filter_data;
+
+  context = cogl_context_egl_new (display, error);
+  if (!context)
+    return NULL;
+
+  filter_data = g_new0 (CoglEventFilterData, 1);
+  g_weak_ref_init (&filter_data->context, context);
+  _cogl_renderer_add_native_filter (cogl_display_get_renderer (display),
+                                    (CoglNativeFilterFunc) event_filter_cb,
+                                    filter_data);
+
+  return context;
 }
 
 /* Texture-from-pixmap support. This is X11/EGL specific (GLX support
@@ -523,9 +496,6 @@ cogl_winsys_egl_x11_texture_pixmap_create (CoglTexturePixmapX11 *tex_pixmap)
   CoglTexturePixmapEGL *egl_tex_pixmap;
   EGLint attribs[] = {EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE};
   CoglPixelFormat texture_format;
-  CoglRendererEGL *egl_renderer;
-
-  egl_renderer = cogl_renderer_get_winsys_data (ctx->display->renderer);
 
   ensure_egl_image_khr_resolved ();
   if (!create_image_khr || !destroy_image_khr)
@@ -537,7 +507,7 @@ cogl_winsys_egl_x11_texture_pixmap_create (CoglTexturePixmapX11 *tex_pixmap)
   egl_tex_pixmap = g_new0 (CoglTexturePixmapEGL, 1);
 
   egl_tex_pixmap->image =
-    create_image_khr (egl_renderer->edpy,
+    create_image_khr (context_get_edisplay (ctx),
                       EGL_NO_CONTEXT,
                       EGL_NATIVE_PIXMAP_KHR,
                       (EGLClientBuffer) tex_pixmap->pixmap,
@@ -574,7 +544,6 @@ cogl_winsys_egl_x11_texture_pixmap_free (CoglTexturePixmapX11 *tex_pixmap)
 {
   CoglTexturePixmapEGL *egl_tex_pixmap;
   CoglContext *ctx;
-  CoglRendererEGL *egl_renderer;
 
   ctx = cogl_texture_get_context (COGL_TEXTURE (tex_pixmap));
 
@@ -582,13 +551,12 @@ cogl_winsys_egl_x11_texture_pixmap_free (CoglTexturePixmapX11 *tex_pixmap)
     return;
 
   egl_tex_pixmap = tex_pixmap->winsys;
-  egl_renderer = cogl_renderer_get_winsys_data (ctx->display->renderer);
 
   if (egl_tex_pixmap->texture)
     g_object_unref (egl_tex_pixmap->texture);
 
   if (egl_tex_pixmap->image != EGL_NO_IMAGE_KHR)
-    destroy_image_khr (egl_renderer->edpy, egl_tex_pixmap->image);
+    destroy_image_khr (context_get_edisplay (ctx), egl_tex_pixmap->image);
 
   tex_pixmap->winsys = NULL;
   g_free (egl_tex_pixmap);

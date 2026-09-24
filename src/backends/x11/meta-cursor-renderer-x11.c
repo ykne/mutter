@@ -96,7 +96,7 @@ create_x_cursor (Display           *xdisplay,
   if (cursor == CLUTTER_CURSOR_NONE)
     return create_blank_cursor (xdisplay);
 
-  result = XcursorLibraryLoadCursor (xdisplay, meta_cursor_get_name (cursor));
+  result = XcursorLibraryLoadCursor (xdisplay, clutter_cursor_type_to_name (cursor));
   if (!result)
     result = XcursorLibraryLoadCursor (xdisplay, meta_cursor_get_legacy_name (cursor));
 
@@ -551,8 +551,10 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
 
   if (xwindow == None)
     {
+      /* Getting the texture is what realizes the cursor image, which the
+       * software cursor overlay needs later on. */
       if (cursor_sprite)
-        clutter_cursor_realize_texture (cursor_sprite);
+        clutter_cursor_get_texture (cursor_sprite);
       return;
     }
 
@@ -564,10 +566,7 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
   if (cursor == CLUTTER_CURSOR_INHERIT &&
       cursor_sprite && META_IS_CURSOR_XCURSOR (cursor_sprite))
     {
-      MetaCursorXcursor *sprite_xcursor =
-        META_CURSOR_XCURSOR (cursor_sprite);
-
-      cursor = meta_cursor_xcursor_get_cursor (sprite_xcursor);
+      cursor = clutter_cursor_get_cursor_type (cursor_sprite);
     }
 
   if (cursor != CLUTTER_CURSOR_INHERIT)
@@ -629,7 +628,7 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
     }
 
   if (cursor_sprite)
-    clutter_cursor_realize_texture (cursor_sprite);
+    clutter_cursor_get_texture (cursor_sprite);
 
   if (x11->force_sw_cursor)
     {

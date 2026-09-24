@@ -39,8 +39,9 @@ static void
 meta_cursor_renderer_x11_nested_update_cursor (MetaCursorRenderer *renderer,
                                                ClutterCursor      *cursor_sprite)
 {
+  /* Getting the texture is what realizes the cursor image. */
   if (cursor_sprite)
-    clutter_cursor_realize_texture (cursor_sprite);
+    clutter_cursor_get_texture (cursor_sprite);
 }
 
 /* Nested mode has no real hardware cursor of its own to speak of (it's

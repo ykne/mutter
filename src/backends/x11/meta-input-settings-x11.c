@@ -541,6 +541,10 @@ set_device_accel_profile (MetaInputSettings           *settings,
     default:
       g_warn_if_reached ();
       G_GNUC_FALLTHROUGH;
+    case G_DESKTOP_POINTER_ACCEL_PROFILE_CUSTOM:
+      /* xf86-input-libinput only knows the flat and adaptive profiles,
+       * there is no way to hand it a custom acceleration curve. */
+      G_GNUC_FALLTHROUGH;
     case G_DESKTOP_POINTER_ACCEL_PROFILE_DEFAULT:
       values[0] = defaults[0];
       values[1] = defaults[1];
@@ -559,7 +563,8 @@ err_available:
 static void
 meta_input_settings_x11_set_mouse_accel_profile (MetaInputSettings          *settings,
                                                  ClutterInputDevice         *device,
-                                                 GDesktopPointerAccelProfile profile)
+                                                 GDesktopPointerAccelProfile profile,
+                                                 MetaCustomAccelConfig       *accel_config)
 {
   ClutterInputCapabilities caps = clutter_input_device_get_capabilities (device);
 
@@ -577,7 +582,8 @@ meta_input_settings_x11_set_mouse_accel_profile (MetaInputSettings          *set
 static void
 meta_input_settings_x11_set_touchpad_accel_profile (MetaInputSettings          *settings,
                                                     ClutterInputDevice         *device,
-                                                    GDesktopPointerAccelProfile profile)
+                                                    GDesktopPointerAccelProfile profile,
+                                                    MetaCustomAccelConfig       *accel_config)
 {
   ClutterInputCapabilities caps = clutter_input_device_get_capabilities (device);
 
@@ -590,7 +596,8 @@ meta_input_settings_x11_set_touchpad_accel_profile (MetaInputSettings          *
 static void
 meta_input_settings_x11_set_trackball_accel_profile (MetaInputSettings          *settings,
                                                      ClutterInputDevice         *device,
-                                                     GDesktopPointerAccelProfile profile)
+                                                     GDesktopPointerAccelProfile profile,
+                                                     MetaCustomAccelConfig       *accel_config)
 {
   ClutterInputCapabilities caps = clutter_input_device_get_capabilities (device);
 
@@ -603,7 +610,8 @@ meta_input_settings_x11_set_trackball_accel_profile (MetaInputSettings          
 static void
 meta_input_settings_x11_set_pointing_stick_accel_profile (MetaInputSettings           *settings,
                                                           ClutterInputDevice          *device,
-                                                          GDesktopPointerAccelProfile  profile)
+                                                          GDesktopPointerAccelProfile  profile,
+                                                          MetaCustomAccelConfig       *accel_config)
 {
   ClutterInputCapabilities caps = clutter_input_device_get_capabilities (device);
 

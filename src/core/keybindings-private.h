@@ -152,3 +152,14 @@ const char * meta_prefs_get_iso_next_group_option (void);
 gboolean meta_display_process_keybinding_event (MetaDisplay        *display,
                                                 const char         *name,
                                                 const ClutterEvent *event);
+
+gboolean meta_prefs_is_locate_pointer_enabled (void);
+
+typedef void (* MetaKeyBindingForeach) (MetaDisplay          *display,
+                                        MetaKeyBindingFlags   flags,
+                                        MetaResolvedKeyCombo *resolved_key_binding,
+                                        gpointer              user_data);
+
+void meta_display_keybinding_foreach (MetaDisplay           *display,
+                                      MetaKeyBindingForeach  func,
+                                      gpointer               user_data);

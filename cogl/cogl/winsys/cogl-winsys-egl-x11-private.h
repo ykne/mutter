@@ -30,13 +30,41 @@
 
 #pragma once
 
-#include "cogl/winsys/cogl-winsys-egl.h"
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+
+#include "cogl/cogl-context.h"
+#include "cogl/cogl-display-egl.h"
+#include "cogl/cogl-renderer-egl.h"
 #include "cogl/winsys/cogl-texture-pixmap-x11-private.h"
 
-#define COGL_TYPE_WINSYS_EGL_X11 (cogl_winsys_egl_x11_get_type ())
+/*
+ * EGL-over-Xlib rendering, on top of upstream's CoglRendererEGL /
+ * CoglDisplayEGL / CoglContextEGL classes (which replaced the old
+ * CoglWinsys/CoglWinsysEGL vtable this backend used to subclass).
+ */
+
+#define COGL_TYPE_RENDERER_EGL_X11 (cogl_renderer_egl_x11_get_type ())
 COGL_EXPORT
-G_DECLARE_FINAL_TYPE (CoglWinsysEglX11, cogl_winsys_egl_x11,
-                     COGL, WINSYS_EGL_X11, CoglWinsysEGL)
+G_DECLARE_FINAL_TYPE (CoglRendererEglX11, cogl_renderer_egl_x11,
+                      COGL, RENDERER_EGL_X11, CoglRendererEGL)
+
+#define COGL_TYPE_DISPLAY_EGL_X11 (cogl_display_egl_x11_get_type ())
+COGL_EXPORT
+G_DECLARE_FINAL_TYPE (CoglDisplayEglX11, cogl_display_egl_x11,
+                      COGL, DISPLAY_EGL_X11, CoglDisplayEGL)
+
+COGL_EXPORT
+CoglRenderer * cogl_renderer_egl_x11_new (void);
+
+COGL_EXPORT
+CoglDisplay * cogl_display_egl_x11_new (CoglRenderer *renderer);
+
+/* Creates the CoglContext, and hooks the renderer's native (XEvent)
+ * filter up so ConfigureNotify events resize the matching CoglOnscreen. */
+COGL_EXPORT
+CoglContext * cogl_context_egl_x11_new (CoglDisplay  *display,
+                                        GError      **error);
 
 XVisualInfo *
 cogl_display_xlib_get_visual_info (CoglDisplay *display,

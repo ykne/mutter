@@ -16,6 +16,7 @@ mutter_pkg_deps = [
   gio_unix_dep,
   glib_dep,
   gsettings_desktop_schemas_dep,
+  wayland_server_dep,
 ]
 
 mutter_pkg_private_deps = [
@@ -499,6 +500,24 @@ if have_x11_client
   ]
 endif
 
+if have_xwayland
+  mutter_sources += [
+    'wayland/meta-wayland-x11-interop.c',
+    'wayland/meta-wayland-x11-interop.h',
+    'wayland/meta-window-xwayland.c',
+    'wayland/meta-window-xwayland.h',
+    'wayland/meta-xwayland-dnd-private.h',
+    'wayland/meta-xwayland-dnd.c',
+    'wayland/meta-xwayland-grab-keyboard.c',
+    'wayland/meta-xwayland-grab-keyboard.h',
+    'wayland/meta-xwayland-private.h',
+    'wayland/meta-xwayland-surface.c',
+    'wayland/meta-xwayland-surface.h',
+    'wayland/meta-xwayland.c',
+    'wayland/meta-xwayland.h',
+  ]
+endif
+
 if have_remote_desktop
   mutter_sources += [
     'backends/meta-eis.c',
@@ -544,8 +563,8 @@ if have_remote_desktop
   ]
 endif
 
-  mutter_sources += [
-    'compositor/meta-surface-actor-wayland.c',
+mutter_sources += [
+  'compositor/meta-surface-actor-wayland.c',
   'compositor/meta-surface-actor-wayland.h',
   'compositor/meta-window-actor-wayland.c',
   'compositor/meta-window-actor-wayland.h',
@@ -707,7 +726,7 @@ endif
   'wayland/meta-wayland-xdg-toplevel-tag.h',
   'wayland/meta-window-wayland.c',
   'wayland/meta-window-wayland.h',
-  ]
+]
 
 mutter_sources += [
   'wayland/meta-wayland-drm-lease.c',
@@ -1281,6 +1300,7 @@ pkg.generate(libmutter,
     'pkglibdir=' + pkglibdir,
     'girdir=${libdir}/mutter-' + libmutter_api_version,
     'typelibdir=${libdir}/mutter-' + libmutter_api_version,
+    'have_xwayland=@0@'.format(have_xwayland),
     'have_x11=@0@'.format(have_x11),
     'have_x11_client=@0@'.format(have_x11_client),
     'have_wayland=@0@'.format(have_wayland),

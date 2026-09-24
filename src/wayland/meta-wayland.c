@@ -1309,3 +1309,13 @@ meta_wayland_compositor_get_current_window (MetaWaylandCompositor *compositor,
 
   return meta_wayland_surface_get_toplevel_window (surface);
 }
+
+void
+meta_wayland_compositor_update_key_state (MetaWaylandCompositor *compositor,
+                                          char                  *key_vector,
+                                          int                    key_vector_len,
+                                          int                    offset)
+{
+  meta_wayland_keyboard_update_key_state (compositor->seat->keyboard,
+                                          key_vector, key_vector_len, offset);
+}

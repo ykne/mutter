@@ -61,16 +61,10 @@
 
 G_DEFINE_TYPE_WITH_PRIVATE (CoglDriverGL, cogl_driver_gl, COGL_TYPE_DRIVER);
 
-/* Drops each texture unit's "currently bound layer" reference. Safe to
- * call more than once (e.g. once explicitly early during context
- * teardown, then again - a no-op by then - from dispose()): a stray
- * layer left bound here is otherwise the last thing keeping some
- * window's texture (e.g. a CoglTexturePixmapX11) alive, and unreffing
- * it via dispose()'s own late cascade runs after the context's display
- * is already cleared, which crashes. */
 static void
-clear_texture_unit_layers (CoglDriverGL *driver)
+cogl_driver_gl_dispose (GObject *object)
 {
+  CoglDriverGL *driver = COGL_DRIVER_GL (object);
   CoglDriverGLPrivate *priv =
     cogl_driver_gl_get_instance_private (driver);
   int i;

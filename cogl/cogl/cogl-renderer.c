@@ -61,13 +61,19 @@ typedef struct _CoglRendererPrivate
 {
   GObject parent_instance;
 
-  CoglDisplay *display;
-
   gboolean connected;
   CoglDriver *driver;
 
   CoglDriverId driver_id;
+
+  GList *native_filters;
 } CoglRendererPrivate;
+
+typedef struct _CoglNativeFilterClosure
+{
+  CoglNativeFilterFunc func;
+  void *data;
+} CoglNativeFilterClosure;
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE (CoglRenderer, cogl_renderer, G_TYPE_OBJECT);
 
@@ -88,6 +94,9 @@ cogl_renderer_dispose (GObject *object)
     cogl_renderer_get_instance_private (renderer);
 
   g_clear_object (&priv->driver);
+
+  g_list_free_full (priv->native_filters, g_free);
+  priv->native_filters = NULL;
 
   G_OBJECT_CLASS (cogl_renderer_parent_class)->dispose (object);
 }
@@ -448,29 +457,17 @@ cogl_renderer_get_latest_sync_fd (CoglRenderer *renderer)
   return class->get_sync_fd (renderer);
 }
 
-CoglDisplay *
-cogl_renderer_get_display (CoglRenderer *renderer)
-{
-  return renderer->display;
-}
-
-void
-cogl_renderer_set_display (CoglRenderer *renderer,
-                           CoglDisplay   *display)
-{
-  renderer->display = display;
-}
-
 void
 _cogl_renderer_add_native_filter (CoglRenderer         *renderer,
                                   CoglNativeFilterFunc  func,
                                   void                 *data)
 {
+  CoglRendererPrivate *priv = cogl_renderer_get_instance_private (renderer);
   CoglNativeFilterClosure *closure = g_new0 (CoglNativeFilterClosure, 1);
 
   closure->func = func;
   closure->data = data;
-  renderer->native_filters = g_list_prepend (renderer->native_filters, closure);
+  priv->native_filters = g_list_prepend (priv->native_filters, closure);
 }
 
 void
@@ -478,16 +475,16 @@ _cogl_renderer_remove_native_filter (CoglRenderer         *renderer,
                                      CoglNativeFilterFunc  func,
                                      void                 *data)
 {
+  CoglRendererPrivate *priv = cogl_renderer_get_instance_private (renderer);
   GList *l;
 
-  for (l = renderer->native_filters; l; l = l->next)
+  for (l = priv->native_filters; l; l = l->next)
     {
       CoglNativeFilterClosure *closure = l->data;
 
       if (closure->func == func && closure->data == data)
         {
-          renderer->native_filters =
-            g_list_delete_link (renderer->native_filters, l);
+          priv->native_filters = g_list_delete_link (priv->native_filters, l);
           g_free (closure);
           return;
         }
@@ -496,11 +493,12 @@ _cogl_renderer_remove_native_filter (CoglRenderer         *renderer,
 
 CoglFilterReturn
 cogl_renderer_handle_event (CoglRenderer *renderer,
-                                    void         *event)
+                            void         *event)
 {
+  CoglRendererPrivate *priv = cogl_renderer_get_instance_private (renderer);
   GList *l;
 
-  for (l = renderer->native_filters; l; l = l->next)
+  for (l = priv->native_filters; l; l = l->next)
     {
       CoglNativeFilterClosure *closure = l->data;
 

@@ -1775,3 +1775,14 @@ meta_shaped_texture_set_color_repr (MetaShapedTexture            *stex,
   meta_texture_mipmap_set_coeffs (stex->texture_mipmap, coeffs);
   meta_shaped_texture_reset_pipelines (stex);
 }
+
+void
+meta_shaped_texture_set_fallback_size (MetaShapedTexture *stex,
+                                       int                fallback_width,
+                                       int                fallback_height)
+{
+  stex->fallback_width = fallback_width;
+  stex->fallback_height = fallback_height;
+
+  invalidate_size (stex);
+}

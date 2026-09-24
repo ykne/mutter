@@ -36,7 +36,6 @@
 #include "cogl/cogl-util.h"
 #include "cogl/cogl-context-private.h"
 #include "cogl/cogl-renderer-private.h"
-#include "cogl/cogl-driver.h"
 #include "cogl/cogl-journal-private.h"
 #include "cogl/cogl-texture-private.h"
 #include "cogl/cogl-pipeline-private.h"
@@ -994,6 +993,17 @@ cogl_context_prepend_framebuffer (CoglContext     *context,
     cogl_context_get_instance_private (context);
 
   priv->framebuffers = g_list_prepend (priv->framebuffers, framebuffer);
+}
+
+/* Restored alongside the X11 backend, whose EGL/Xlib event filter needs to map
+ * an X window back to the CoglOnscreen it belongs to. */
+GList *
+cogl_context_get_framebuffers (CoglContext *context)
+{
+  CoglContextPrivate *priv =
+    cogl_context_get_instance_private (context);
+
+  return priv->framebuffers;
 }
 
 void

@@ -29,8 +29,9 @@
 #include "cogl/winsys/cogl-onscreen-xlib.h"
 
 #include "cogl/cogl-context-private.h"
-#include "cogl/cogl-display-private.h"
+#include "cogl/cogl-display-egl.h"
 #include "cogl/cogl-framebuffer-private.h"
+#include "cogl/cogl-renderer-egl.h"
 #include "cogl/cogl-renderer-private.h"
 #include "cogl/cogl-x11-onscreen.h"
 #include "cogl/cogl-xlib-renderer-private.h"
@@ -64,8 +65,8 @@ create_xwindow (CoglOnscreenXlib  *onscreen_xlib,
   CoglOnscreen *onscreen = COGL_ONSCREEN (onscreen_xlib);
   CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
   CoglContext *context = cogl_framebuffer_get_context (framebuffer);
-  CoglDisplay *display = context->display;
-  CoglRenderer *renderer = display->renderer;
+  CoglDisplay *display = cogl_context_get_display (context);
+  CoglRenderer *renderer = cogl_display_get_renderer (display);
   CoglXlibRenderer *xlib_renderer =
     _cogl_xlib_renderer_get_data (renderer);
   Window xwin;
@@ -143,11 +144,12 @@ cogl_onscreen_xlib_allocate (CoglFramebuffer  *framebuffer,
   CoglOnscreenXlib *onscreen_xlib = COGL_ONSCREEN_XLIB (framebuffer);
   CoglOnscreenEgl *onscreen_egl = COGL_ONSCREEN_EGL (framebuffer);
   CoglContext *context = cogl_framebuffer_get_context (framebuffer);
-  CoglDisplay *display = context->display;
-  CoglRenderer *renderer = display->renderer;
-  CoglRendererEGL *egl_renderer = cogl_renderer_get_winsys_data (renderer);
-  CoglDisplayEGL *egl_display = display->winsys;
-  EGLConfig egl_config = egl_display->egl_config;
+  CoglDisplay *display = cogl_context_get_display (context);
+  CoglRenderer *renderer = cogl_display_get_renderer (display);
+  EGLDisplay edpy =
+    cogl_renderer_egl_get_edisplay (COGL_RENDERER_EGL (renderer));
+  EGLConfig egl_config =
+    cogl_display_egl_get_egl_config (COGL_DISPLAY_EGL (display));
   Window xwin;
   EGLSurface egl_surface;
   CoglFramebufferClass *parent_class;
@@ -159,7 +161,7 @@ cogl_onscreen_xlib_allocate (CoglFramebuffer  *framebuffer,
   onscreen_xlib->xwin = xwin;
 
   egl_surface =
-    eglCreateWindowSurface (egl_renderer->edpy,
+    eglCreateWindowSurface (edpy,
                             egl_config,
                             (EGLNativeWindowType) onscreen_xlib->xwin,
                             NULL);
@@ -178,9 +180,10 @@ cogl_onscreen_xlib_get_window_handles (CoglOnscreen *onscreen,
   CoglOnscreenXlib *onscreen_xlib = COGL_ONSCREEN_XLIB (onscreen);
   CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
   CoglContext *cogl_context = cogl_framebuffer_get_context (framebuffer);
-  CoglDisplayEGL *cogl_display_egl = cogl_context->display->winsys;
+  CoglDisplayEGL *cogl_display_egl =
+    COGL_DISPLAY_EGL (cogl_context_get_display (cogl_context));
 
-  *device_out = cogl_display_egl->egl_context;
+  *device_out = cogl_display_egl_get_egl_context (cogl_display_egl);
   *window_out = (gpointer) onscreen_xlib->xwin;
 
   return TRUE;
@@ -197,7 +200,8 @@ cogl_onscreen_xlib_dispose (GObject *object)
     {
       CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (object);
       CoglContext *context = cogl_framebuffer_get_context (framebuffer);
-      CoglRenderer *renderer = context->display->renderer;
+      CoglRenderer *renderer =
+        cogl_display_get_renderer (cogl_context_get_display (context));
       CoglXlibRenderer *xlib_renderer =
         _cogl_xlib_renderer_get_data (renderer);
 

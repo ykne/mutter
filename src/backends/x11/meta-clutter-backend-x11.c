@@ -38,6 +38,7 @@
 #include "clutter/clutter-mutter.h"
 #include "clutter/clutter.h"
 #include "cogl/cogl-xlib-renderer.h"
+#include "cogl/winsys/cogl-winsys-egl-x11-private.h"
 #include "core/bell.h"
 #include "meta/meta-backend.h"
 
@@ -82,6 +83,22 @@ meta_clutter_backend_x11_get_renderer (ClutterBackend  *clutter_backend,
   MetaRenderer *renderer = meta_backend_get_renderer (priv->backend);
 
   return meta_renderer_create_cogl_renderer (renderer);
+}
+
+static CoglDisplay *
+meta_clutter_backend_x11_get_display (ClutterBackend  *clutter_backend,
+                                      CoglRenderer    *cogl_renderer,
+                                      GError         **error)
+{
+  return cogl_display_egl_x11_new (cogl_renderer);
+}
+
+static CoglContext *
+meta_clutter_backend_x11_get_context (ClutterBackend  *clutter_backend,
+                                      CoglDisplay     *cogl_display,
+                                      GError         **error)
+{
+  return cogl_context_egl_x11_new (cogl_display, error);
 }
 
 static ClutterStageWindow *
@@ -340,6 +357,8 @@ meta_clutter_backend_x11_class_init (MetaClutterBackendX11Class *klass)
   object_class->finalize = meta_clutter_backend_x11_finalize;
 
   clutter_backend_class->get_renderer = meta_clutter_backend_x11_get_renderer;
+  clutter_backend_class->get_display = meta_clutter_backend_x11_get_display;
+  clutter_backend_class->get_context = meta_clutter_backend_x11_get_context;
   clutter_backend_class->create_stage = meta_clutter_backend_x11_create_stage;
   clutter_backend_class->get_default_seat = meta_clutter_backend_x11_get_default_seat;
   clutter_backend_class->is_display_server = meta_clutter_backend_x11_is_display_server;

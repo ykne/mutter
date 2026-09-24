@@ -106,6 +106,10 @@ struct _MetaMonitorTiled
 
   /* The output enabled even when a non-tiled mode is used. */
   MetaOutput *main_output;
+
+  /* Restored alongside the X11 backend: the XRandR monitor manager
+   * matches tiled monitors by their tile group. */
+  uint32_t tile_group_id;
 };
 
 G_DEFINE_TYPE (MetaMonitorTiled, meta_monitor_tiled, META_TYPE_MONITOR)
@@ -2009,6 +2013,8 @@ meta_monitor_tiled_new (MetaMonitorManager  *monitor_manager,
   monitor_priv->backend = meta_monitor_manager_get_backend (monitor_manager);
   monitor_tiled->monitor_manager = monitor_manager;
 
+  monitor_tiled->tile_group_id = meta_output_get_info (output)->tile_info.group_id;
+
   origin_output = output;
   outputs = find_tiled_monitor_outputs (meta_output_get_gpu (output),
                                         origin_output);
@@ -3079,4 +3085,17 @@ meta_monitor_get_default_scale (MetaMonitor     *monitor,
     }
 
   return FALSE;
+}
+
+void
+meta_monitor_derive_layout (MetaMonitor  *monitor,
+                            MtkRectangle *layout)
+{
+  META_MONITOR_GET_CLASS (monitor)->derive_layout (monitor, layout);
+}
+
+uint32_t
+meta_monitor_tiled_get_tile_group_id (MetaMonitorTiled *monitor_tiled)
+{
+  return monitor_tiled->tile_group_id;
 }

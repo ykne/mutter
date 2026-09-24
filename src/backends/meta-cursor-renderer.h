@@ -91,3 +91,5 @@ void meta_cursor_renderer_update_stage_overlay (MetaCursorRenderer *renderer,
 META_EXPORT_TEST
 gboolean meta_cursor_renderer_needs_overlay_on_view (MetaCursorRenderer *renderer,
                                                      ClutterStageView   *view);
+
+MetaBackend * meta_cursor_renderer_get_backend (MetaCursorRenderer *renderer);

@@ -343,3 +343,8 @@ gboolean meta_monitor_get_default_scale (MetaMonitor     *monitor,
                                          float           *out_scale);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaMonitorSpec, meta_monitor_spec_free)
+
+void meta_monitor_derive_layout (MetaMonitor  *monitor,
+                                 MtkRectangle *layout);
+
+uint32_t meta_monitor_tiled_get_tile_group_id (MetaMonitorTiled *monitor_tiled);

@@ -322,3 +322,5 @@ void meta_display_maybe_update_sticky_mouse_focus (MetaDisplay *display);
 
 void meta_display_handle_sticky_mouse_focus_event (MetaDisplay        *display,
                                                    const ClutterEvent *event);
+
+gboolean meta_grab_op_is_keyboard (MetaGrabOp op);
