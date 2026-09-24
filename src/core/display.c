@@ -44,6 +44,10 @@
 #include "compositor/compositor-private.h"
 #include "compositor/meta-compositor-native.h"
 #include "compositor/meta-compositor-server.h"
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#include "compositor/meta-compositor-x11.h"
+#endif
 #include "cogl/cogl.h"
 #include "core/bell.h"
 #include "core/boxes-private.h"
@@ -335,13 +339,18 @@ meta_display_class_init (MetaDisplayClass *klass)
    *
    * The ::modifiers-accelerator-activated signal will be emitted when
    * a special modifiers-only keybinding is activated.
+   *
+   * Returns: %TRUE means that the keyboard device should remain
+   *    frozen and %FALSE for the default behavior of unfreezing the
+   *    keyboard.
    */
   display_signals[MODIFIERS_ACCELERATOR_ACTIVATED] =
     g_signal_new ("modifiers-accelerator-activated",
                   G_TYPE_FROM_CLASS (klass),
                   G_SIGNAL_RUN_LAST,
-                  0, NULL, NULL, NULL,
-                  G_TYPE_NONE, 0);
+                  0,
+                  g_signal_accumulator_first_wins, NULL, NULL,
+                  G_TYPE_BOOLEAN, 0);
 
   display_signals[FOCUS_WINDOW] =
     g_signal_new ("focus-window",
@@ -580,6 +589,10 @@ create_compositor (MetaDisplay *display)
 
   if (META_IS_BACKEND_NATIVE (backend))
     return META_COMPOSITOR (meta_compositor_native_new (display, backend));
+#ifdef HAVE_X11
+  if (META_IS_BACKEND_X11 (backend))
+    return META_COMPOSITOR (meta_compositor_x11_new (display, backend));
+#endif
 
   g_assert_not_reached ();
 }
@@ -786,6 +799,11 @@ meta_display_new (MetaContext  *context,
   guint32 timestamp = 0;
   MetaMonitorManager *monitor_manager;
   MetaInputCapture *input_capture;
+  gboolean is_x11_backend = FALSE;
+
+#ifdef HAVE_X11
+  is_x11_backend = META_IS_BACKEND_X11 (backend);
+#endif
 
   display = g_object_new (META_TYPE_DISPLAY, NULL);
 
@@ -853,21 +871,66 @@ meta_display_new (MetaContext  *context,
 
 
 #ifdef HAVE_XWAYLAND
-  MetaWaylandCompositor *wayland_compositor =
-    wayland_compositor_from_display (display);
-  MetaX11DisplayPolicy x11_display_policy;
-
-  meta_xwayland_init_display (&wayland_compositor->xwayland_manager,
-                              display);
-
-  x11_display_policy = meta_context_get_x11_display_policy (context);
-  if (x11_display_policy == META_X11_DISPLAY_POLICY_MANDATORY)
+  /* Under the X11 backend there is no Wayland compositor role for an
+   * XWayland server to attach to (x11_display is set up synchronously
+   * just below instead) - none of this applies. Without this guard,
+   * meta_display_init_x11() unconditionally calls
+   * meta_xwayland_start_xserver() to spawn a real Xwayland process that
+   * has nothing to attach to, which either hangs or otherwise interferes
+   * with the real X11 display connection established below. */
+  if (!is_x11_backend)
     {
-      meta_display_init_x11 (display, NULL,
-                              (GAsyncReadyCallback) on_mandatory_x11_initialized,
-                              NULL);
+      MetaWaylandCompositor *wayland_compositor =
+        wayland_compositor_from_display (display);
+      MetaX11DisplayPolicy x11_display_policy;
+
+      meta_xwayland_init_display (&wayland_compositor->xwayland_manager,
+                                  display);
+
+      x11_display_policy = meta_context_get_x11_display_policy (context);
+      if (x11_display_policy == META_X11_DISPLAY_POLICY_MANDATORY)
+        {
+          meta_display_init_x11 (display, NULL,
+                                  (GAsyncReadyCallback) on_mandatory_x11_initialized,
+                                  NULL);
+        }
     }
 #endif /* HAVE_XWAYLAND */
+
+#ifdef HAVE_X11
+  /* Under the X11 backend, the X11 display *is* the (only) display, so
+   * it has to exist before meta_compositor_manage() below (whose X11
+   * implementation, meta_compositor_x11_manage(), dereferences
+   * display->x11_display directly) - unlike the XWayland case above,
+   * where x11_display is created lazily, asynchronously, well after
+   * the compositor is already running.
+   *
+   * This has to happen here, after create_compositor() *and* after
+   * workspace_manager/stack/bell/selection are all already created
+   * above - meta_x11_display_new() itself reaches back into all of
+   * them (e.g. meta_x11_display_update_workspace_layout() reads
+   * display->workspace_manager, schedule_reload_x11_cursor() reads
+   * display->compositor's MetaLaters) exactly like the async XWayland
+   * path already assumes, since in that path meta_display_init_x11()
+   * is never called until long after meta_display_new() has fully
+   * returned. */
+  if (is_x11_backend)
+    {
+      MetaX11Display *x11_display;
+
+      x11_display = meta_x11_display_new (display, error);
+      if (!x11_display)
+        {
+          g_object_unref (display);
+          return NULL;
+        }
+
+      display->x11_display = x11_display;
+      g_signal_emit (display, display_signals[X11_DISPLAY_SETUP], 0);
+      meta_x11_display_create_guard_window (x11_display);
+    }
+#endif
+
   timestamp = meta_display_get_current_time_roundtrip (display);
 
 
@@ -2246,10 +2309,14 @@ meta_display_accelerator_deactivate (MetaDisplay           *display,
                  clutter_event_get_time (event));
 }
 
-void
+gboolean
 meta_display_modifiers_accelerator_activate (MetaDisplay *display)
 {
-  g_signal_emit (display, display_signals[MODIFIERS_ACCELERATOR_ACTIVATED], 0);
+  gboolean freeze;
+
+  g_signal_emit (display, display_signals[MODIFIERS_ACCELERATOR_ACTIVATED], 0, &freeze);
+
+  return freeze;
 }
 
 /**
@@ -2424,12 +2491,17 @@ meta_display_get_pad_button_label (MetaDisplay        *display,
   if (label)
     return label;
 
-  /* Second, lookup the actions set by the clients */
+  /* Second, lookup the actions set by the clients - no Wayland
+   * compositor role (or tablet-pad protocol) exists under the X11
+   * backend, see meta_context_start(). */
   compositor = wayland_compositor_from_display (display);
-  tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager,
-                                                          compositor->seat);
-  if (tablet_seat)
-    tablet_pad = meta_wayland_tablet_seat_lookup_pad (tablet_seat, pad);
+  if (compositor)
+    {
+      tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager,
+                                                              compositor->seat);
+      if (tablet_seat)
+        tablet_pad = meta_wayland_tablet_seat_lookup_pad (tablet_seat, pad);
+    }
 
   if (tablet_pad)
     {
@@ -2463,13 +2535,18 @@ meta_display_get_pad_feature_label (MetaDisplay        *display,
   if (label)
     return label;
 
-  /* Second, lookup the actions set by the clients */
+  /* Second, lookup the actions set by the clients - no Wayland
+   * compositor role (or tablet-pad protocol) exists under the X11
+   * backend, see meta_context_start(). */
 
   compositor = wayland_compositor_from_display (display);
-  tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager,
-                                                          compositor->seat);
-  if (tablet_seat)
-    tablet_pad = meta_wayland_tablet_seat_lookup_pad (tablet_seat, pad);
+  if (compositor)
+    {
+      tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager,
+                                                              compositor->seat);
+      if (tablet_seat)
+        tablet_pad = meta_wayland_tablet_seat_lookup_pad (tablet_seat, pad);
+    }
 
   if (tablet_pad)
     {

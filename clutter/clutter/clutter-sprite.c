@@ -32,6 +32,7 @@
 #include "clutter/clutter-event-private.h"
 #include "clutter/clutter-focus-private.h"
 #include "clutter/clutter-grab.h"
+#include "clutter/clutter-mutter.h"
 #include "clutter/clutter-private.h"
 #include "clutter/clutter-seat-private.h"
 #include "clutter/clutter-stage-private.h"
@@ -74,8 +75,33 @@ struct _ClutterSpritePrivate
   ClutterActor *implicit_grab_actor;
   GArray *event_emission_chain;
 
+  /* Safety net for an implicit grab whose matching BUTTON_RELEASE never
+   * reaches clutter_sprite_propagate_event() at all - not just with a
+   * NULL target_actor, genuinely never delivered here. Confirmed this
+   * happens for real, legitimate X11 reasons this backend can't predict
+   * or special-case: e.g. clicking a GTK4 window's own header-bar
+   * minimize/maximize button, where GTK establishes its own client-side
+   * device grab to track the click through to release - the release is
+   * then delivered exclusively to that client per normal X11 grab
+   * semantics, which is correct protocol behavior, not a bug anywhere.
+   * ClutterSprite's implicit-grab bookkeeping has no equivalent under
+   * Wayland (the compositor is always the sole arbiter of input there,
+   * so this scenario is structurally impossible), so it has no path to
+   * ever find out the release isn't coming. Reset via a watchdog timer
+   * instead: any further activity for this device (a real MOTION or
+   * RELEASE reaching here) reschedules it, so it never fires during
+   * genuine, ongoing interaction (a real drag keeps generating motion
+   * far more often than the timeout); if nothing at all arrives for the
+   * whole window, the grab is presumed abandoned and force-cancelled. */
+  guint implicit_grab_watchdog_id;
+
   ClutterCursor *cursor;
 };
+
+/* Generous on purpose - this only needs to catch a gesture that's
+ * genuinely gone silent (no motion, no release, nothing), not add
+ * latency to normal interaction. See the field comment above. */
+#define IMPLICIT_GRAB_WATCHDOG_MS 2000
 
 G_DEFINE_TYPE_WITH_PRIVATE (ClutterSprite, clutter_sprite, CLUTTER_TYPE_FOCUS)
 
@@ -83,6 +109,8 @@ static void clutter_sprite_emit_crossing_event (ClutterSprite      *sprite,
                                                 const ClutterEvent *event,
                                                 ClutterActor       *deepmost,
                                                 ClutterActor       *topmost);
+
+static void arm_implicit_grab_watchdog (ClutterSprite *sprite);
 
 typedef enum
 {
@@ -131,9 +159,22 @@ free_event_receiver (EventReceiver *receiver)
 }
 
 static void
+disarm_implicit_grab_watchdog (ClutterSprite *sprite)
+{
+  ClutterSpritePrivate *priv = clutter_sprite_get_instance_private (sprite);
+
+  if (priv->implicit_grab_watchdog_id)
+    {
+      g_clear_handle_id (&priv->implicit_grab_watchdog_id, g_source_remove);
+    }
+}
+
+static void
 cleanup_implicit_grab (ClutterSprite *sprite)
 {
   ClutterSpritePrivate *priv = clutter_sprite_get_instance_private (sprite);
+
+  disarm_implicit_grab_watchdog (sprite);
 
   clutter_actor_set_implicitly_grabbed (priv->implicit_grab_actor, FALSE);
   priv->implicit_grab_actor = NULL;
@@ -147,6 +188,75 @@ cleanup_implicit_grab (ClutterSprite *sprite)
 }
 
 static gboolean
+implicit_grab_watchdog_cb (gpointer user_data)
+{
+  ClutterSprite *sprite = user_data;
+  ClutterSpritePrivate *priv = clutter_sprite_get_instance_private (sprite);
+
+  /* A genuinely abandoned grab (the scenario this watchdog exists for)
+   * looks identical, from this sprite's point of view, to a legitimate
+   * press-and-hold with no motion (a touchscreen long-press, a held
+   * scrollbar/spin-button repeat, or just holding a mouse button still) -
+   * both produce zero further events for the whole timeout window.
+   * Before presuming abandonment, ask the X server directly whether a
+   * button is still actually down: XIQueryPointer() (via
+   * clutter_seat_query_state()) is independent of whether Clutter ever
+   * sees another event for this device, unlike everything else this
+   * sprite tracks. If a button is still genuinely held, this isn't
+   * abandoned - just quiet - so push the deadline back out instead of
+   * force-cancelling a live interaction.
+   *
+   * Scoped to the pointer case (priv->sequence == NULL) only: touch
+   * sequences have no equivalent independent state to query - the only
+   * per-sequence tracking available (MetaSeatX11's touch_coords table)
+   * is populated and cleared by the very same TOUCH_BEGIN/END events
+   * this watchdog exists to route around the loss of, so checking it
+   * would just ask this sprite's own ambiguous state a second time. */
+  if (priv->sequence == NULL)
+    {
+      ClutterStage *stage = clutter_focus_get_stage (CLUTTER_FOCUS (sprite));
+      ClutterContext *context = clutter_actor_get_context (CLUTTER_ACTOR (stage));
+      ClutterBackend *backend = clutter_context_get_backend (context);
+      ClutterSeat *seat = clutter_backend_get_default_seat (backend);
+      ClutterModifierType modifiers = 0;
+
+      if (clutter_seat_query_state (seat, sprite, NULL, &modifiers) &&
+          (modifiers & (CLUTTER_BUTTON1_MASK | CLUTTER_BUTTON2_MASK |
+                       CLUTTER_BUTTON3_MASK | CLUTTER_BUTTON4_MASK |
+                       CLUTTER_BUTTON5_MASK)))
+        {
+          CLUTTER_NOTE (GRABS,
+                        "[device=%p sequence=%p] Implicit grab watchdog "
+                        "fired but a button is still genuinely held down - "
+                        "not abandoned, rescheduling",
+                        priv->sprite_device, priv->sequence);
+          arm_implicit_grab_watchdog (sprite);
+          return G_SOURCE_REMOVE;
+        }
+    }
+
+  CLUTTER_NOTE (GRABS,
+                "[device=%p sequence=%p] Implicit grab watchdog fired - no "
+                "further activity for this device in %ums, force-cancelling",
+                priv->sprite_device, priv->sequence, IMPLICIT_GRAB_WATCHDOG_MS);
+
+  priv->implicit_grab_watchdog_id = 0;
+  cleanup_implicit_grab (sprite);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+arm_implicit_grab_watchdog (ClutterSprite *sprite)
+{
+  ClutterSpritePrivate *priv = clutter_sprite_get_instance_private (sprite);
+
+  g_clear_handle_id (&priv->implicit_grab_watchdog_id, g_source_remove);
+  priv->implicit_grab_watchdog_id =
+    g_timeout_add (IMPLICIT_GRAB_WATCHDOG_MS, implicit_grab_watchdog_cb, sprite);
+}
+
+static gboolean
 setup_implicit_grab (ClutterSprite *sprite)
 {
   ClutterSpritePrivate *priv = clutter_sprite_get_instance_private (sprite);
@@ -157,6 +267,7 @@ setup_implicit_grab (ClutterSprite *sprite)
    */
   if (priv->sequence == NULL && priv->press_count)
     {
+      arm_implicit_grab_watchdog (sprite);
       priv->press_count++;
       return FALSE;
     }
@@ -168,6 +279,7 @@ setup_implicit_grab (ClutterSprite *sprite)
   g_assert (priv->press_count == 0);
   g_assert (priv->event_emission_chain->len == 0);
 
+  arm_implicit_grab_watchdog (sprite);
   priv->press_count = 1;
   return TRUE;
 }
@@ -245,6 +357,8 @@ sync_crossings_on_implicit_grab_end (ClutterSprite *sprite)
   ClutterEvent *crossing;
 
   if (!priv->current_actor)
+    return;
+  if (!priv->implicit_grab_actor)
     return;
   if (clutter_actor_contains (priv->current_actor, priv->implicit_grab_actor))
     return;
@@ -444,6 +558,11 @@ clutter_sprite_finalize (GObject *object)
 {
   ClutterSprite *sprite = CLUTTER_SPRITE (object);
   ClutterSpritePrivate *priv = clutter_sprite_get_instance_private (sprite);
+
+  /* Should already be disarmed by whatever reset press_count to 0 - this
+   * is just a defensive backstop against ever leaving a timeout source
+   * pointing at a freed sprite. */
+  disarm_implicit_grab_watchdog (sprite);
 
   if (priv->current_actor)
     {
@@ -917,6 +1036,12 @@ clutter_sprite_propagate_event (ClutterFocus       *focus,
     {
       EventHandledState state;
 
+      /* Real activity for this implicit grab (motion, a second press, or
+       * the release that's about to end it below) - the gesture is
+       * demonstrably still alive, so push the watchdog back out. See the
+       * field comment on implicit_grab_watchdog_id. */
+      arm_implicit_grab_watchdog (sprite);
+
       state = emit_event (event, priv->event_emission_chain);
 
       if (state == EVENT_HANDLED_BY_ACTOR)
@@ -1121,16 +1246,40 @@ clutter_sprite_maybe_break_implicit_grab (ClutterSprite *sprite,
         }
     }
 
+  disarm_implicit_grab_watchdog (sprite);
+
   clutter_actor_set_implicitly_grabbed (priv->implicit_grab_actor, FALSE);
   priv->implicit_grab_actor = NULL;
 
+  /* Handing the implicit-grab bookkeeping off to a mapped parent (previous
+   * behavior below, now removed) assumes the original press's matching
+   * BUTTON_RELEASE will still arrive and complete the gesture normally
+   * against that parent. That does not hold when the actor unmapped
+   * because its whole window went away (e.g. clicking a window's own
+   * minimize button, mid-press) - confirmed via live tracing (see
+   * project_226_minimize_click_swallows_input.md) that the matching
+   * release never reaches clutter_sprite_propagate_event() at all in
+   * that case, and a mapped parent (the window's own actor, then its
+   * ancestors up to the always-mapped stage) is *always* found, so the
+   * transfer-to-parent branch fired every time and priv->press_count was
+   * NEVER reset. Every later press anywhere else on this device then hit
+   * setup_implicit_grab()'s "second button already down" branch instead
+   * of building a fresh grab/event_emission_chain for its own real
+   * target, so the event silently dispatched through a stale, mismatched
+   * chain rather than the actor it actually landed on - stuck
+   * indefinitely, no crash, no error, nothing below Clutter's own
+   * dispatch shows anything wrong.
+   *
+   * Since there is no reliable way here to tell "the release will still
+   * arrive against a surviving ancestor" apart from "this actor's entire
+   * window is gone", always fully cancel the gesture instead - matching
+   * cleanup_implicit_grab()'s normal end-of-gesture reset. */
   if (parent)
-    {
-      g_assert (clutter_actor_is_mapped (parent));
+    g_assert (clutter_actor_is_mapped (parent));
 
-      priv->implicit_grab_actor = parent;
-      clutter_actor_set_implicitly_grabbed (priv->implicit_grab_actor, TRUE);
-    }
+  g_array_remove_range (priv->event_emission_chain, 0,
+                        priv->event_emission_chain->len);
+  priv->press_count = 0;
 
   clutter_sprite_invalidate_cursor (sprite);
 }

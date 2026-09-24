@@ -1627,6 +1627,8 @@ static gboolean
 process_iso_next_group (MetaDisplay  *display,
                         ClutterEvent *event)
 {
+  MetaContext *context = meta_display_get_context (display);
+  MetaBackend *backend = meta_context_get_backend (context);
   MetaKeyBindingManager *keys = &display->key_binding_manager;
   uint32_t keyval = clutter_event_get_key_symbol (event);
   ClutterModifierType modifiers;
@@ -1646,7 +1648,12 @@ process_iso_next_group (MetaDisplay  *display,
     {
       if (mask == keys->iso_next_group_combos[i].mask)
         {
-          meta_display_modifiers_accelerator_activate (display);
+          /* If the signal handler returns TRUE the keyboard will
+             remain frozen. It's the signal handler's responsibility
+             to unfreeze it. */
+          if (!meta_display_modifiers_accelerator_activate (display))
+            meta_backend_unfreeze_keyboard (backend,
+                                            clutter_event_get_time (event));
           return TRUE;
         }
     }

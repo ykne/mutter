@@ -28,6 +28,7 @@
 #include "compositor/meta-cullable.h"
 #include "compositor/meta-shaped-texture-private.h"
 #include "compositor/meta-surface-actor.h"
+#include "compositor/meta-surface-actor-x11.h"
 #include "core/window-private.h"
 #include "meta/compositor.h"
 #include "meta/meta-enum-types.h"
@@ -291,6 +292,13 @@ meta_window_actor_x11_assign_surface_actor (MetaWindowActor  *actor,
   prev_surface_actor = meta_window_actor_get_surface (actor);
   if (prev_surface_actor)
     {
+      /* This used to warn if !meta_is_wayland_compositor() here (surface
+       * actor reassignment was assumed to be Wayland/Xwayland-surface-swap
+       * specific); meta_is_wayland_compositor() doesn't exist any more and
+       * this is always a primary X11 session, so that assumption no longer
+       * applies here one way or the other - dropped rather than leaving a
+       * warning that would now fire unconditionally on this path. */
+
       g_clear_signal_handler (&actor_x11->size_changed_id, prev_surface_actor);
       clutter_actor_remove_child (CLUTTER_ACTOR (actor),
                                   CLUTTER_ACTOR (prev_surface_actor));
@@ -426,6 +434,50 @@ has_shadow (MetaWindowActorX11 *actor_x11)
    */
   return TRUE;
 }
+
+#ifdef HAVE_X11
+gboolean
+meta_window_actor_x11_should_unredirect (MetaWindowActorX11 *actor_x11)
+{
+  MetaWindow *window =
+    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
+  MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
+  MetaSurfaceActor *surface;
+  MetaSurfaceActorX11 *surface_x11;
+
+  if (meta_window_actor_is_destroyed (META_WINDOW_ACTOR (actor_x11)))
+    return FALSE;
+
+  if (!meta_window_x11_can_unredirect (window_x11))
+    return FALSE;
+
+  surface = meta_window_actor_get_surface (META_WINDOW_ACTOR (actor_x11));
+  if (!surface)
+    return FALSE;
+
+  if (!META_IS_SURFACE_ACTOR_X11 (surface))
+    return FALSE;
+
+  surface_x11 = META_SURFACE_ACTOR_X11 (surface);
+  return meta_surface_actor_x11_should_unredirect (surface_x11);
+}
+
+void
+meta_window_actor_x11_set_unredirected (MetaWindowActorX11 *actor_x11,
+                                        gboolean            unredirected)
+{
+  MetaSurfaceActor *surface;
+  MetaSurfaceActorX11 *surface_x11;
+
+  surface = meta_window_actor_get_surface (META_WINDOW_ACTOR (actor_x11));
+  g_assert (surface);
+
+  g_return_if_fail (META_IS_SURFACE_ACTOR_X11 (surface));
+
+  surface_x11 = META_SURFACE_ACTOR_X11 (surface);
+  meta_surface_actor_x11_set_unredirected (surface_x11, unredirected);
+}
+#endif /* HAVE_X11 */
 
 static const char *
 get_shadow_class (MetaWindowActorX11 *actor_x11)
@@ -632,6 +684,30 @@ check_needs_shadow (MetaWindowActorX11 *actor_x11)
 
   if (old_shadow)
     meta_shadow_unref (old_shadow);
+}
+
+void
+meta_window_actor_x11_process_damage (MetaWindowActorX11 *actor_x11,
+                                      XDamageNotifyEvent *event)
+{
+  MetaSurfaceActor *surface;
+
+  surface = meta_window_actor_get_surface (META_WINDOW_ACTOR (actor_x11));
+  if (surface)
+    {
+      MetaWindow *window =
+        meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
+      MtkRectangle area;
+
+      area = MTK_RECTANGLE_INIT (event->area.x,
+                                 event->area.y,
+                                 event->area.width,
+                                 event->area.height);
+      meta_window_protocol_to_stage_rect (window, &area, &area);
+      meta_surface_actor_process_damage (surface, &area);
+    }
+
+  meta_window_actor_notify_damaged (META_WINDOW_ACTOR (actor_x11));
 }
 
 static MtkRegion *
@@ -946,6 +1022,12 @@ is_actor_maybe_transparent (MetaWindowActorX11 *actor_x11)
   if (!surface)
     return TRUE;
 
+#ifdef HAVE_X11
+  if (META_IS_SURFACE_ACTOR_X11 (surface) &&
+      meta_surface_actor_x11_is_unredirected (META_SURFACE_ACTOR_X11 (surface)))
+    return FALSE;
+#endif
+
   stex = meta_surface_actor_get_texture (surface);
   if (!meta_shaped_texture_has_alpha (stex))
     return FALSE;
@@ -1073,6 +1155,12 @@ handle_updates (MetaWindowActorX11 *actor_x11)
     meta_window_actor_get_surface (META_WINDOW_ACTOR (actor_x11));
   MetaWindow *window;
 
+#ifdef HAVE_X11
+  if (META_IS_SURFACE_ACTOR_X11 (surface) &&
+      meta_surface_actor_x11_is_unredirected (META_SURFACE_ACTOR_X11 (surface)))
+    return;
+#endif
+
   window = meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
   if (meta_window_actor_is_frozen (META_WINDOW_ACTOR (actor_x11)))
     {
@@ -1088,6 +1176,19 @@ handle_updates (MetaWindowActorX11 *actor_x11)
 
       return;
     }
+
+#ifdef HAVE_X11
+  if (META_IS_SURFACE_ACTOR_X11 (surface))
+    {
+      MetaSurfaceActorX11 *surface_x11 = META_SURFACE_ACTOR_X11 (surface);
+
+      meta_surface_actor_x11_handle_updates (surface_x11);
+    }
+
+  if (META_IS_SURFACE_ACTOR_X11 (surface) &&
+      !meta_surface_actor_x11_is_visible (META_SURFACE_ACTOR_X11 (surface)))
+    return;
+#endif /* HAVE_X11 */
 
   update_frame_bounds (actor_x11);
   check_needs_reshape (actor_x11);

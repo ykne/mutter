@@ -37,6 +37,11 @@
 
 #include "backends/native/meta-backend-native.h"
 
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#include "x11/window-x11.h"
+#endif
+
 #define IS_KEY_EVENT(et) ((et) == CLUTTER_KEY_PRESS || \
                           (et) == CLUTTER_KEY_RELEASE)
 
@@ -48,6 +53,49 @@ stage_from_display (MetaDisplay *display)
 
   return CLUTTER_STAGE (meta_backend_get_stage (backend));
 }
+
+#ifdef HAVE_X11
+/* FIX (sloppy-focus-lost-after-resize-50.4 investigation, round 9/14):
+ * the two earlier fix attempts (meta_window_x11_grab_op_ended()'s
+ * re-select and meta_window_focus()'s re-select) both re-issue the
+ * per-window XI2 Enter/Leave/FocusIn/FocusOut selection at assumed-safe
+ * checkpoints, but a live repro found both firing successfully moments
+ * before a crossing that then failed the exact same way - the loss
+ * isn't reliably tied to one fixed point, it can recur from the
+ * crossing/transition itself. Rather than guess more checkpoints, react
+ * directly to the symptom: a real LEAVE with no matching ENTER arriving
+ * shortly after is exactly the shape of what happens right before hover
+ * gets stuck (the window being left drops off the selection, and
+ * whatever should have been entered next never generates its own
+ * event). One MetaDisplay per process, so file-static state is enough -
+ * no need to thread this through MetaDisplayPrivate. */
+static guint orphaned_leave_timeout_id = 0;
+
+static gboolean
+on_orphaned_leave_timeout (gpointer user_data)
+{
+  MetaDisplay *display = user_data;
+
+  orphaned_leave_timeout_id = 0;
+  meta_window_x11_reselect_all_managed_window_events (display);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+cancel_orphaned_leave_timeout (void)
+{
+  g_clear_handle_id (&orphaned_leave_timeout_id, g_source_remove);
+}
+
+static void
+arm_orphaned_leave_timeout (MetaDisplay *display)
+{
+  cancel_orphaned_leave_timeout ();
+  orphaned_leave_timeout_id =
+    g_timeout_add (150, on_orphaned_leave_timeout, display);
+}
+#endif
 
 static gboolean
 stage_has_key_focus (MetaDisplay *display)
@@ -62,6 +110,28 @@ stage_has_grab (MetaDisplay *display)
 {
   ClutterStage *stage = stage_from_display (display);
 
+  /* This used to also exclude grab_actor == CLUTTER_ACTOR (stage), on
+   * the theory that Clutter falls back to an "implicit" grab on the
+   * stage itself when a button press isn't claimed by any reactive
+   * actor. That premise doesn't hold: ClutterStage's topmost_grab is
+   * only ever set by clutter_grab_activate(), called from
+   * clutter_stage_grab()/clutter_stage_grab_inactive() - both of which
+   * require an explicit actor argument from the caller. There is no
+   * Clutter-internal path that grabs the stage on its own.
+   *
+   * grab_actor == stage in practice means a real, deliberate whole-stage
+   * modal grab - gnome-shell's Main.pushModal(global.stage, ...) (which
+   * calls exactly clutter_stage_grab(stage, stage)) is exactly this,
+   * and it's not a rare case: the overview (overview.js), the GDM login
+   * screen (loginDialog.js), and workspace-switch animations
+   * (workspaceAnimation.js) all use it. The exclusion made
+   * get_window_for_event() and the unmodified-click handling below
+   * treat all of those as "no grab", letting clicks fall through to
+   * mutter's normal per-window focus/raise/move handling instead of
+   * being properly captured by the active modal grab - confirmed by
+   * mutter's own test harness (src/tests/meta-test-shell.c) using the
+   * identical clutter_stage_grab(stage, CLUTTER_ACTOR (stage)) pattern
+   * to simulate the overview's grab. */
   return clutter_stage_get_grab_actor (stage) != NULL;
 }
 
@@ -83,6 +153,7 @@ get_window_for_event (MetaDisplay        *display,
     }
 
   window_actor = meta_window_actor_from_actor (event_actor);
+
   if (window_actor)
     return meta_window_actor_get_meta_window (window_actor);
   else
@@ -132,9 +203,16 @@ meta_display_handle_event (MetaDisplay        *display,
   MetaWaylandTextInput *wayland_text_input = NULL;
   uint32_t time_ms;
 
+  /* No Wayland compositor role exists under the X11 backend (see
+   * meta_context_start()) - text-input routing is a Wayland protocol
+   * concept, wayland_text_input just stays NULL, same as its
+   * declaration default. */
   wayland_compositor = meta_context_get_wayland_compositor (context);
-  wayland_text_input =
-    meta_wayland_compositor_get_text_input (wayland_compositor);
+  if (wayland_compositor)
+    {
+      wayland_text_input =
+        meta_wayland_compositor_get_text_input (wayland_compositor);
+    }
 
   COGL_TRACE_BEGIN_SCOPED (MetaDisplayHandleEvent,
                            "Meta::Display::handle_event()");
@@ -146,7 +224,27 @@ meta_display_handle_event (MetaDisplay        *display,
   event_type = clutter_event_type (event);
 
   if (meta_display_process_captured_input (display, event))
-    return CLUTTER_EVENT_STOP;
+    {
+      /* A globally-keybound keycode's passive XIGrabModeSync grab
+       * freezes the keyboard device the instant X delivers the matching
+       * KEY_PRESS, regardless of which mutter code path ends up
+       * consuming it - see the THAW/REPLAY comment further down in this
+       * function (08c1b797f). A captured-input grab (e.g. a gesture or
+       * eavesdrop grab) can consume a key event before that later logic
+       * ever runs, leaving the device frozen just like the original bug
+       * this function already fixed on its normal path. THAW here is
+       * always correct (never REPLAY): we're returning STOP, keeping
+       * this event as our own. XIAllowEvents() is a no-op if this
+       * particular event didn't actually engage a SYNC freeze. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend) && IS_KEY_EVENT (event_type))
+        {
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         META_EVENT_MODE_THAW);
+        }
+#endif
+      return CLUTTER_EVENT_STOP;
+    }
 
   if (IS_KEY_EVENT (event_type))
     {
@@ -162,7 +260,19 @@ meta_display_handle_event (MetaDisplay        *display,
         {
           a11y_grabbed = meta_a11y_manager_notify_clients (a11y_manager, event);
           if (a11y_grabbed)
-            return CLUTTER_EVENT_STOP;
+            {
+              /* Same reasoning as the captured-input case above: an AT-SPI
+               * keystroke listener (e.g. Orca) can consume a globally-bound
+               * key before the THAW/REPLAY logic further down ever runs. */
+#ifdef HAVE_X11
+              if (META_IS_BACKEND_X11 (backend))
+                {
+                  meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                                 META_EVENT_MODE_THAW);
+                }
+#endif
+              return CLUTTER_EVENT_STOP;
+            }
         }
     }
   else if (event_type == CLUTTER_MOTION &&
@@ -183,7 +293,47 @@ meta_display_handle_event (MetaDisplay        *display,
       !clutter_event_get_device_tool (event))
     meta_display_handle_sticky_mouse_focus_event (display, event);
 
-  meta_wayland_compositor_update (wayland_compositor, event);
+  if (wayland_compositor)
+    meta_wayland_compositor_update (wayland_compositor, event);
+#ifdef HAVE_X11
+  else if (META_IS_BACKEND_X11 (backend))
+    {
+      /* meta_display_handle_window_enter() (sloppy/mouse focus-follows-
+       * pointer, see meta_prefs_get_focus_mode()) has exactly one caller
+       * in the whole tree: meta_wayland_pointer_update(), reached only
+       * via meta_wayland_compositor_update() above - which is never
+       * called under the X11 backend (there is no Wayland compositor
+       * role there, see meta_context_start()). So under X11, changing
+       * focus-mode to "sloppy" or "mouse" had zero effect: the GSettings
+       * key was read correctly, but nothing ever told mutter which
+       * window the pointer just entered. XI_Enter/XI_Leave are already
+       * selected on client windows (window-x11.c) and already reach
+       * here as ordinary CLUTTER_ENTER/CLUTTER_LEAVE events (via
+       * meta-seat-x11.c's clutter_event_crossing_new()) - mirror
+       * meta_wayland_pointer_update()'s own handling of those event
+       * types, using get_window_for_event() (already stage_has_grab()-
+       * aware, so this correctly stays inert during an active modal
+       * grab) in place of the Wayland surface-to-window lookup. */
+      if ((event_type == CLUTTER_ENTER || event_type == CLUTTER_LEAVE) &&
+          !clutter_event_get_event_sequence (event))
+        {
+          MetaWindow *enter_window;
+          graphene_point_t pos;
+
+          if (event_type == CLUTTER_LEAVE)
+            arm_orphaned_leave_timeout (display);
+          else
+            cancel_orphaned_leave_timeout ();
+
+          clutter_event_get_coords (event, &pos.x, &pos.y);
+          enter_window = get_window_for_event (display, event, event_actor);
+
+          meta_display_handle_window_enter (display, enter_window,
+                                            clutter_event_get_time (event),
+                                            (int) pos.x, (int) pos.y);
+        }
+    }
+#endif
 
   if (event_type == CLUTTER_PAD_BUTTON_PRESS ||
       event_type == CLUTTER_PAD_BUTTON_RELEASE ||
@@ -268,9 +418,83 @@ meta_display_handle_event (MetaDisplay        *display,
    * in a keyboard-grabbed mode like moving a window, we don't
    * want to pass the key event to the compositor or Wayland at all.
    */
-  if (!meta_compositor_get_current_window_drag (compositor) &&
-      meta_keybindings_process_event (display, window, event))
-    return CLUTTER_EVENT_STOP;
+  if (!meta_compositor_get_current_window_drag (compositor))
+    {
+      gboolean keybinding_handled =
+        meta_keybindings_process_event (display, window, event);
+
+      /* Every keycode bound to a global keybinding (see
+       * meta_compositor_x11_change_keygrab()) is passively grabbed with
+       * XIGrabModeSync, which freezes the virtual keyboard device the
+       * instant a matching key is pressed - X won't deliver any further
+       * key events for that device, bound or not, until something calls
+       * XIAllowEvents(). Nothing ever did on this path, so the very
+       * first global shortcut in a session (the bare overlay key, Print,
+       * Super+Left tiling, ...) froze the keyboard for good. Thaw it
+       * here - REPLAY sends the event on to the client when we didn't
+       * handle it (mirrors the analogous fix for the passive button
+       * grab in meta_window_handle_ungrabbed_event()), THAW just
+       * unfreezes when we did. */
+#ifdef HAVE_X11
+      if (META_IS_BACKEND_X11 (backend) && IS_KEY_EVENT (event_type))
+        {
+          MetaEventMode event_mode;
+
+          event_mode = keybinding_handled ?
+            META_EVENT_MODE_THAW : META_EVENT_MODE_REPLAY;
+
+          /* A PROPAGATE here for a KEY_PRESS matching the overlay-key or
+           * locate-pointer-key's own keycode isn't "not ours, let the
+           * client see it" - it's process_special_modifier_key() (see
+           * keybindings.c) tentatively arming its "waiting for a lone
+           * release" flag, deliberately deferring the real decision
+           * until that release arrives (or a different key's press
+           * proves this wasn't a lone tap - see that function's own
+           * comment). REPLAY-ing this press anyway - which only matters
+           * when nothing is focused, since a focused client's own
+           * per-window grab otherwise gives the sequence a second
+           * chance - loses the device's claim on the matching
+           * KEY_RELEASE that's still to come: it never reaches this
+           * handler at all, so the tap is silently swallowed and the
+           * flag is left stuck armed. Confirmed live: with no window
+           * focused, a bare Super tap consistently did nothing at all;
+           * a second tap then worked, because process_special_modifier_key()
+           * took its "repeat press, already armed" branch instead - a
+           * STOP, which THAWs correctly. THAW here instead: we're
+           * keeping this event as our own regardless of how the
+           * sequence resolves, so there's nothing to replay to anyone. */
+          if (event_mode == META_EVENT_MODE_REPLAY &&
+              event_type == CLUTTER_KEY_PRESS)
+            {
+              MetaKeyBindingManager *keys = &display->key_binding_manager;
+              uint32_t keycode = clutter_event_get_key_code (event);
+              MetaResolvedKeyCombo *combos[] = {
+                &keys->overlay_resolved_key_combo,
+                &keys->locate_pointer_resolved_key_combo,
+              };
+              int i, j;
+
+              for (i = 0; i < (int) G_N_ELEMENTS (combos); i++)
+                {
+                  for (j = 0; j < combos[i]->len; j++)
+                    {
+                      if (combos[i]->keycodes[j] == keycode)
+                        {
+                          event_mode = META_EVENT_MODE_THAW;
+                          break;
+                        }
+                    }
+                }
+            }
+
+          meta_backend_x11_allow_events (META_BACKEND_X11 (backend), event,
+                                         event_mode);
+        }
+#endif
+
+      if (keybinding_handled)
+        return CLUTTER_EVENT_STOP;
+    }
 
   /* Do not pass keyboard events to Wayland if key focus is not on the
    * stage in normal mode (e.g. during keynav in the panel)
@@ -316,7 +540,8 @@ meta_display_handle_event (MetaDisplay        *display,
       time_ms != CLUTTER_CURRENT_TIME)
     meta_window_check_alive_on_event (window, time_ms);
 
-  if (meta_wayland_compositor_handle_event (wayland_compositor, event))
+  if (wayland_compositor &&
+      meta_wayland_compositor_handle_event (wayland_compositor, event))
     return CLUTTER_EVENT_STOP;
 
   return CLUTTER_EVENT_PROPAGATE;

@@ -1,0 +1,80 @@
+/* -*- mode: C; c-file-style: "gnu"; indent-tabs-mode: nil; -*- */
+
+/*
+ * Copyright (C) 2016 Red Hat
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 2 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ *
+ * Written by:
+ *     Jonas Ådahl <jadahl@gmail.com>
+ */
+
+#include "config.h"
+
+#include <glib-object.h>
+
+#include "backends/meta-backend-private.h"
+#include "backends/meta-logical-monitor-private.h"
+#include "backends/meta-renderer-view.h"
+#include "backends/meta-renderer.h"
+#include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-clutter-backend-x11.h"
+#include "backends/x11/meta-renderer-x11.h"
+#include "cogl/cogl-xlib-renderer.h"
+#include "cogl/cogl.h"
+#include "core/boxes-private.h"
+#include "meta/meta-backend.h"
+#include "meta/util.h"
+
+#include "cogl/winsys/cogl-winsys-egl-x11-private.h"
+
+G_DEFINE_TYPE (MetaRendererX11, meta_renderer_x11, META_TYPE_RENDERER)
+
+static CoglRenderer *
+meta_renderer_x11_create_cogl_renderer (MetaRenderer *renderer)
+{
+  MetaBackend *backend = meta_renderer_get_backend (renderer);
+  MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
+  Display *xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
+  CoglRenderer *cogl_renderer;
+  CoglWinsys *winsys;
+
+  /* GLX support isn't built (-Dglx=false): EGL-over-Xlib is the only
+   * X11 rendering backend, so instantiate it unconditionally instead
+   * of dispatching on cogl_renderer_get_driver_id() /
+   * meta_is_wayland_compositor() the way upstream historically did
+   * when both backends were selectable. */
+  winsys = g_object_new (COGL_TYPE_WINSYS_EGL_X11,
+                         "name", "EGL_XLIB",
+                         NULL);
+
+  cogl_renderer = cogl_renderer_new ();
+  cogl_renderer_set_custom_winsys (cogl_renderer, winsys);
+  cogl_xlib_renderer_set_foreign_display (cogl_renderer, xdisplay);
+
+  return cogl_renderer;
+}
+
+static void
+meta_renderer_x11_init (MetaRendererX11 *renderer_x11)
+{
+}
+
+static void
+meta_renderer_x11_class_init (MetaRendererX11Class *klass)
+{
+  MetaRendererClass *renderer_class = META_RENDERER_CLASS (klass);
+
+  renderer_class->create_cogl_renderer = meta_renderer_x11_create_cogl_renderer;
+}

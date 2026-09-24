@@ -42,6 +42,13 @@ void meta_keymap_description_owner_unref (MetaKeymapDescriptionOwner *owner);
 MetaKeymapDescription * meta_keymap_description_new_from_fd (MetaSealedFd           *sealed_fd,
                                                              enum xkb_keymap_format  format);
 
+/* Restored alongside the X11 backend, see meta-keymap-description.c. */
+gboolean meta_keymap_description_get_rules (MetaKeymapDescription  *keymap_description,
+                                            const char            **model,
+                                            const char            **layout,
+                                            const char            **variant,
+                                            const char            **options);
+
 struct xkb_keymap * meta_keymap_description_create_xkb_keymap (MetaKeymapDescription  *keymap_description,
                                                                GStrv                  *out_display_names,
                                                                GStrv                  *out_short_names,

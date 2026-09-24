@@ -89,6 +89,17 @@ struct _CoglDriverClass
                         CoglClipStack   *stack,
                         CoglFramebuffer *framebuffer);
 
+  /* Drops any pipeline layers the driver is holding onto internally
+   * (e.g. per-GL-texture-unit "currently bound layer" bookkeeping).
+   * Optional - called explicitly during context teardown, before the
+   * owning CoglDisplay/CoglRenderer are torn down, so that any texture
+   * a stale cached layer references (such as a CoglTexturePixmapX11
+   * outliving its window) gets disposed while it's still safe to do
+   * so, rather than as a late side-effect of the driver's own dispose
+   * running after the display is already gone. */
+  void
+  (* clear_texture_units) (CoglDriver *driver);
+
   CoglBufferImpl * (* create_buffer_impl) (CoglDriver *driver);
 
   CoglTextureDriver * (* create_texture_driver) (CoglDriver *driver);

@@ -20,6 +20,11 @@
 #include "backends/native/meta-backend-native.h"
 #include "backends/native/meta-barrier-native.h"
 
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-barrier-x11.h"
+#endif
+
 typedef struct _MetaBarrierPrivate
 {
   MetaBackend *backend;
@@ -241,6 +246,11 @@ init_barrier_impl (MetaBarrier *barrier)
 
   if (META_IS_BACKEND_NATIVE (priv->backend))
     priv->impl = meta_barrier_impl_native_new (barrier);
+
+#if defined(HAVE_X11)
+  if (META_IS_BACKEND_X11 (priv->backend))
+    priv->impl = meta_barrier_impl_x11_new (barrier);
+#endif
 
   g_warn_if_fail (priv->impl);
 }

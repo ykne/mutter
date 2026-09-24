@@ -61,6 +61,8 @@ typedef struct _CoglRendererPrivate
 {
   GObject parent_instance;
 
+  CoglDisplay *display;
+
   gboolean connected;
   CoglDriver *driver;
 
@@ -444,4 +446,67 @@ cogl_renderer_get_latest_sync_fd (CoglRenderer *renderer)
     return -1;
 
   return class->get_sync_fd (renderer);
+}
+
+CoglDisplay *
+cogl_renderer_get_display (CoglRenderer *renderer)
+{
+  return renderer->display;
+}
+
+void
+cogl_renderer_set_display (CoglRenderer *renderer,
+                           CoglDisplay   *display)
+{
+  renderer->display = display;
+}
+
+void
+_cogl_renderer_add_native_filter (CoglRenderer         *renderer,
+                                  CoglNativeFilterFunc  func,
+                                  void                 *data)
+{
+  CoglNativeFilterClosure *closure = g_new0 (CoglNativeFilterClosure, 1);
+
+  closure->func = func;
+  closure->data = data;
+  renderer->native_filters = g_list_prepend (renderer->native_filters, closure);
+}
+
+void
+_cogl_renderer_remove_native_filter (CoglRenderer         *renderer,
+                                     CoglNativeFilterFunc  func,
+                                     void                 *data)
+{
+  GList *l;
+
+  for (l = renderer->native_filters; l; l = l->next)
+    {
+      CoglNativeFilterClosure *closure = l->data;
+
+      if (closure->func == func && closure->data == data)
+        {
+          renderer->native_filters =
+            g_list_delete_link (renderer->native_filters, l);
+          g_free (closure);
+          return;
+        }
+    }
+}
+
+CoglFilterReturn
+cogl_renderer_handle_event (CoglRenderer *renderer,
+                                    void         *event)
+{
+  GList *l;
+
+  for (l = renderer->native_filters; l; l = l->next)
+    {
+      CoglNativeFilterClosure *closure = l->data;
+
+      if (closure->func (event, closure->data) == COGL_FILTER_REMOVE)
+        return COGL_FILTER_REMOVE;
+    }
+
+  return COGL_FILTER_CONTINUE;
 }

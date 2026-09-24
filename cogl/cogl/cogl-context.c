@@ -36,6 +36,7 @@
 #include "cogl/cogl-util.h"
 #include "cogl/cogl-context-private.h"
 #include "cogl/cogl-renderer-private.h"
+#include "cogl/cogl-driver.h"
 #include "cogl/cogl-journal-private.h"
 #include "cogl/cogl-texture-private.h"
 #include "cogl/cogl-pipeline-private.h"

@@ -37,6 +37,10 @@
 #include "backends/native/meta-backend-native.h"
 #include "backends/native/meta-backend-native-types.h"
 
+#ifdef HAVE_X11
+#include "backends/x11/cm/meta-backend-x11-cm.h"
+#endif
+
 #ifdef HAVE_DEVKIT
 #include "core/meta-mdk.h"
 #endif
@@ -264,9 +268,38 @@ meta_context_main_create_backend (MetaContext  *context,
 {
   MetaContextMain *context_main = META_CONTEXT_MAIN (context);
 
+  /* An explicit --headless/--devkit flag must win over the ambient
+   * XDG_SESSION_TYPE env var below, not the other way around - a
+   * terminal launching `mutter --headless`/`--devkit` (the standard
+   * dev/test/CI invocation, and how gnome-remote-desktop's headless
+   * launcher starts mutter) inherits XDG_SESSION_TYPE=x11 from any
+   * X11 session it happens to run inside, which used to make the env
+   * check below fire first and construct a real MetaBackendX11Cm
+   * against that live $DISPLAY instead of the requested headless
+   * backend. */
   if (context_main->options.headless ||
       context_main->options.devkit)
     return create_headless_backend (context, error);
+
+  /* This entry point never grew an X11 case of its own when the X11
+   * backend was restored - MetaBackendX11Cm existed and worked (see the
+   * winsys/cursor ports elsewhere in this tree) but nothing ever
+   * instantiated it, so every session silently got the native/Wayland
+   * backend regardless of XDG_SESSION_TYPE, matching what the
+   * ConditionEnvironment=XDG_SESSION_TYPE=%I gating on the
+   * org.gnome.Shell@wayland/@x11 systemd units already assumes callers
+   * decide on. Mirror that same env var here, since gnome-shell's
+   * concrete X11/wayland service units both invoke it with identical,
+   * flag-less command lines - only the environment differs. */
+#ifdef HAVE_X11
+  if (g_strcmp0 (g_getenv ("XDG_SESSION_TYPE"), "x11") == 0)
+    {
+      return g_initable_new (META_TYPE_BACKEND_X11_CM,
+                             NULL, error,
+                             "context", context,
+                             NULL);
+    }
+#endif
 
   return create_native_backend (context, error);
 

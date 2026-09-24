@@ -305,4 +305,37 @@ cogl_renderer_get_proc_address (CoglRenderer *renderer,
 COGL_EXPORT
 int cogl_renderer_get_latest_sync_fd (CoglRenderer *renderer);
 
+/**
+ * CoglFilterReturn:
+ * @COGL_FILTER_CONTINUE: The event was not handled, continues the
+ *   processing chain.
+ * @COGL_FILTER_REMOVE: Remove the event, will not be processed further.
+ *
+ * Return values for the #CoglXlibFilterFunc and #CoglWin32FilterFunc functions.
+ */
+typedef enum _CoglFilterReturn
+{
+  COGL_FILTER_CONTINUE,
+  COGL_FILTER_REMOVE
+} CoglFilterReturn;
+
+/**
+ * cogl_renderer_handle_event:
+ * @renderer: a #CoglRenderer
+ * @event: A pointer to a system native event structure
+ *
+ * This function feeds native system events (such as the X11 events
+ * used by cogl_xlib_renderer_set_foreign_display()) to Cogl's own
+ * event filters, e.g. to keep track of monitor/output changes.
+ * Applications hosting a #CoglRenderer on a foreign display
+ * connection should call this for every native event they receive.
+ *
+ * Return value: %COGL_FILTER_REMOVE if Cogl has handled the event and
+ *   it should not be processed further, or %COGL_FILTER_CONTINUE
+ *   otherwise.
+ */
+COGL_EXPORT
+CoglFilterReturn cogl_renderer_handle_event (CoglRenderer *renderer,
+                                             void         *event);
+
 G_END_DECLS
