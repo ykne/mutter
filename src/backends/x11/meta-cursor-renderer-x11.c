@@ -40,6 +40,7 @@
 #include "compositor/meta-window-drag.h"
 #include "meta/display.h"
 #include "meta/meta-context.h"
+#include "mtk/mtk-x11.h"
 #include "mtk/mtk.h"
 
 struct _MetaCursorRendererX11
@@ -149,6 +150,14 @@ pointer_is_over_other_real_window (Display *xdisplay,
 {
   Window root = DefaultRootWindow (xdisplay);
   Window cur = root;
+  gboolean has_class = FALSE;
+
+  /* Every window below the root here belongs to some other client and
+   * can be destroyed at any moment (e.g. the pointer is over an app's
+   * window as it quits), so each request below can fail with
+   * BadWindow. Trap those instead of letting them reach the fatal
+   * default X error handler. */
+  mtk_x11_error_trap_push (xdisplay);
 
   while (TRUE)
     {
@@ -158,7 +167,7 @@ pointer_is_over_other_real_window (Display *xdisplay,
 
       if (!XQueryPointer (xdisplay, cur, &root_ret, &child_ret,
                           &root_x, &root_y, &win_x, &win_y, &mask))
-        return FALSE;
+        goto out;
 
       if (child_ret == None)
         break;
@@ -166,19 +175,24 @@ pointer_is_over_other_real_window (Display *xdisplay,
       cur = child_ret;
     }
 
-  if (cur == root || cur == xwindow)
-    return FALSE;
-
-  XClassHint class_hint = { 0 };
-  gboolean has_class = XGetClassHint (xdisplay, cur, &class_hint) != 0;
-
-  if (has_class)
+  if (cur != root && cur != xwindow)
     {
-      if (class_hint.res_name)
-        XFree (class_hint.res_name);
-      if (class_hint.res_class)
-        XFree (class_hint.res_class);
+      XClassHint class_hint = { 0 };
+
+      has_class = XGetClassHint (xdisplay, cur, &class_hint) != 0;
+
+      if (has_class)
+        {
+          if (class_hint.res_name)
+            XFree (class_hint.res_name);
+          if (class_hint.res_class)
+            XFree (class_hint.res_class);
+        }
     }
+
+out:
+  if (mtk_x11_error_trap_pop_with_return (xdisplay) != 0)
+    return FALSE;
 
   return has_class;
 }
