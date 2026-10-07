@@ -656,6 +656,9 @@ touch_can_grab_surface (MetaWaylandTouchInfo *touch_info,
 {
   MetaWaylandSurface *subsurface;
 
+  if (!touch_info->focus_surface)
+    return FALSE;
+
   if (touch_info->focus_surface->surface == surface)
     return TRUE;
 
