@@ -29,6 +29,12 @@
 #include "compositor/meta-surface-actor.h"
 #include "compositor/meta-window-actor-private.h"
 #include "compositor/meta-surface-actor-wayland.h"
+#ifdef HAVE_X11
+#include "compositor/meta-surface-actor-x11.h"
+#endif
+#ifdef HAVE_XWAYLAND
+#include "wayland/meta-window-xwayland.h"
+#endif
 #include "core/boxes-private.h"
 #include "core/window-private.h"
 #include "meta/window.h"
@@ -608,6 +614,41 @@ init_surface_actor (MetaWindowActor *self)
   MetaWaylandSurface *surface = meta_window_get_wayland_surface (window);
   MetaSurfaceActor *surface_actor = surface ? meta_wayland_surface_get_actor (surface) : NULL;
 
+  /* This function was only ever written for the Wayland/Xwayland case:
+   * a plain X11 window (client_type X11, no wayland surface at all -
+   * meta_window_get_wayland_surface() correctly returns NULL for one)
+   * fell straight through with surface_actor left NULL, so
+   * meta_window_actor_assign_surface_actor() was simply never called.
+   * Confirmed live: windows were managed and sized completely
+   * correctly, but nothing ever created a MetaSurfaceActorX11 for
+   * them (meta_surface_actor_x11_new() had zero callers anywhere in
+   * the codebase) - no surface actor meant no damage tracking meant
+   * no repaint ever got queued, leaving window content (and anything
+   * else needing a repaint after the very first stage expose)
+   * permanently invisible.
+   *
+   * client_type == X11 alone doesn't distinguish a plain X11-CM window
+   * from a MetaWindowXwayland instance under a real Wayland+Xwayland
+   * session (both share it via MetaWindowX11's constructed() vfunc,
+   * genuine upstream design). A real Xwayland window can legitimately
+   * have surface == NULL here too - simply because its wl_surface
+   * hasn't committed yet, not because it has no Wayland surface at
+   * all like a plain X11 window - so building an X11 surface actor
+   * for it would be wrong: meta-xwayland-surface.c later calls
+   * meta_window_actor_assign_surface_actor() with the real Wayland
+   * one once it exists, discarding whatever this constructed in the
+   * meantime. Exclude it here. */
+#ifdef HAVE_X11
+#ifdef HAVE_XWAYLAND
+  if (!surface_actor && window->client_type == META_WINDOW_CLIENT_TYPE_X11 &&
+      !META_IS_WINDOW_XWAYLAND (window))
+    surface_actor = meta_surface_actor_x11_new (window);
+#else
+  if (!surface_actor && window->client_type == META_WINDOW_CLIENT_TYPE_X11)
+    surface_actor = meta_surface_actor_x11_new (window);
+#endif
+#endif
+
   if (surface_actor)
     meta_window_actor_assign_surface_actor (self, surface_actor);
 }
@@ -1051,6 +1092,28 @@ meta_window_actor_sync_actor_geometry (MetaWindowActor *self,
   MetaWindowActorChanges changes = 0;
 
   meta_window_get_buffer_rect (priv->window, &actor_rect);
+
+  /* When running as a Wayland compositor we catch size changes when new
+   * buffers are attached - under X11, nothing else tells the surface
+   * actor's underlying CoglTexturePixmapX11 that the window's pixmap
+   * needs re-fetching after a resize (see meta_surface_actor_x11_set_size(),
+   * which sets self->size_changed, the only thing that makes
+   * update_pixmap() in meta-surface-actor-x11.c detach and refetch a
+   * fresh, correctly-sized pixmap). Without this call, a resized
+   * window's next damage-triggered texture update reads against a
+   * stale, wrong-sized pixmap - confirmed live as a BadMatch on
+   * XShmGetImage (mtk_x_error() error_code 8, minor_code 4) that used
+   * to abort the whole compositor, and which then silently leaves the
+   * screen showing frozen, stale content forever even once that abort
+   * is trapped, despite the window itself continuing to work correctly
+   * underneath (confirmed by comparing a direct window-content capture,
+   * which showed live, correctly up-to-date content, against the
+   * composited screen, which didn't). */
+#ifdef HAVE_X11
+  if (META_IS_SURFACE_ACTOR_X11 (priv->surface))
+    meta_surface_actor_x11_set_size (META_SURFACE_ACTOR_X11 (priv->surface),
+                                     actor_rect.width, actor_rect.height);
+#endif
 
   /* Normally we want freezing a window to also freeze its position; this allows
    * windows to atomically move and resize together, either under app control,

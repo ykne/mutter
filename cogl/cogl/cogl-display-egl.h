@@ -60,6 +60,12 @@ struct _CoglDisplayEGLClass
                                 GError         **error);
 
   void (* cleanup_context) (CoglDisplayEGL *display);
+
+  /* Set by subclasses that need an EGLConfig chosen even when the driver
+   * supports EGL_KHR_no_config_context (which lets the context itself be
+   * created without one) - e.g. the EGL-over-Xlib backend, which derives
+   * the X visual of its windows from the config. */
+  gboolean needs_config;
 };
 
 COGL_EXPORT

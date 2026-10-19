@@ -36,3 +36,5 @@ void meta_renderer_egl_set_renderer_gpu_data (MetaRendererEgl          *renderer
                                               MetaRendererNativeGpuData *renderer_gpu_data);
 
 MetaRendererNativeGpuData * meta_renderer_egl_get_renderer_gpu_data (MetaRendererEgl *renderer_egl);
+
+MetaRenderDevice * meta_renderer_egl_find_render_device (CoglRenderer *cogl_renderer);

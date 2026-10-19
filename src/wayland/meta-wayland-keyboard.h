@@ -81,3 +81,8 @@ gboolean meta_wayland_keyboard_can_popup (MetaWaylandKeyboard *keyboard,
 
 META_EXPORT_TEST
 MetaWaylandSurface * meta_wayland_keyboard_get_focus_surface (MetaWaylandKeyboard *keyboard);
+
+void meta_wayland_keyboard_update_key_state (MetaWaylandKeyboard *compositor,
+                                             char                *key_vector,
+                                             int                  key_vector_len,
+                                             int                  offset);

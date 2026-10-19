@@ -139,7 +139,18 @@ gvdb_dep = dependency('gvdb')
 libdisplay_info_dep = dependency('libdisplay-info', version: libdisplay_info_req)
 libdrm_dep = dependency('libdrm', version: libdrm_req)
 
+have_wayland = get_option('wayland')
+have_x11 = get_option('x11')
 have_xwayland = get_option('xwayland')
+have_x11_client = have_x11 or have_xwayland
+
+if have_xwayland and not have_wayland
+  error('XWayland support requires Wayland support enabled')
+endif
+
+if not have_wayland and not have_x11
+  error('A Wayland/X11 backend must be enabled')
+endif
 
 have_fonts = get_option('fonts')
 
@@ -150,7 +161,7 @@ if have_fonts
   fribidi_dep = dependency('fribidi', version: fribidi_req)
 endif
 
-if have_xwayland
+if have_x11_client
   if not gtk4_dep.found()
     error('X11 client support requires gtk4 @0@'.format(gtk4_req))
   endif
@@ -168,6 +179,13 @@ if have_xwayland
   xcb_res_dep = dependency('xcb-res')
   xinerama_dep = dependency('xinerama')
   xau_dep = dependency('xau')
+
+  if have_x11
+    xcb_randr_dep = dependency('xcb-randr')
+    xkbcommon_x11_dep = dependency('xkbcommon-x11')
+    xkbfile_dep = dependency('xkbfile')
+    xtst_dep = dependency('xtst')
+  endif
 endif
 
 have_gnome_desktop = get_option('libgnome_desktop')
@@ -191,6 +209,15 @@ if have_egl
   egl_dep = dependency('egl')
 endif
 
+have_glx = get_option('glx') and have_x11
+if have_glx
+  if not have_gl
+    error('GLX support requires OpenGL to be enabled')
+  endif
+endif
+
+have_egl_xlib = have_egl and have_x11
+
 have_gles2 = get_option('gles2')
 if have_gles2
   gles2_dep = dependency('glesv2')
@@ -205,21 +232,23 @@ if not have_gl and not have_gles2
   error('Neither GLES2 or OpenGL was enabled')
 endif
 
-if meson.version().version_compare('>= 1.8.0')
-  wl_mod = import('wayland')
-else
-  wl_mod = import('unstable-wayland')
-endif
+if have_wayland
+  if meson.version().version_compare('>= 1.8.0')
+    wl_mod = import('wayland')
+  else
+    wl_mod = import('unstable-wayland')
+  endif
 
-wayland_server_dep = dependency('wayland-server', version: wayland_server_req)
-wayland_client_dep = dependency('wayland-client', version: wayland_server_req)
-wayland_cursor_dep = dependency('wayland-cursor')
-wayland_protocols_dep = dependency('wayland-protocols',
-                                    version: wayland_protocols_req)
-wayland_egl_dep = dependency('wayland-egl')
+  wayland_server_dep = dependency('wayland-server', version: wayland_server_req)
+  wayland_client_dep = dependency('wayland-client', version: wayland_server_req)
+  wayland_cursor_dep = dependency('wayland-cursor')
+  wayland_protocols_dep = dependency('wayland-protocols',
+                                      version: wayland_protocols_req)
+  wayland_egl_dep = dependency('wayland-egl')
 
-if not have_egl
-  error('Wayland support requires EGL to be enabled')
+  if not have_egl
+    error('Wayland support requires EGL to be enabled')
+  endif
 endif
 
 logind_dep = dependency('libsystemd', required: false)
@@ -267,7 +296,7 @@ else
   have_libwacom_get_num_rings = false
 endif
 
-have_startup_notification = get_option('startup_notification') and have_xwayland
+have_startup_notification = get_option('startup_notification') and have_x11_client
 if have_startup_notification
   libstartup_notification_dep = dependency('libstartup-notification-1.0',
                                            version: libstartup_notification_req)
@@ -331,6 +360,7 @@ have_clutter_tests = false
 have_kvm_tests = false
 have_tty_tests = false
 have_installed_tests = false
+have_x11_tests = false
 have_bash_completion = get_option('bash_completion')
 
 if have_fonts or have_xwayland or have_tests
@@ -347,8 +377,10 @@ if have_tests
 
   have_mutter_tests = get_option('mutter_tests')
   if have_mutter_tests
-
-    if not have_xwayland
+    if not have_wayland
+      error('Tests require Wayland to be enabled')
+    endif
+    if not have_x11_client
       error('Tests requires an X11 client')
     endif
     if not dbusmock_dep.found()
@@ -399,6 +431,13 @@ if have_tests
   )
 
   add_test_setup('plain')
+
+  if have_x11
+    xvfb = find_program('xvfb-run', required: false)
+    if xvfb.found()
+      have_x11_tests = true
+    endif
+  endif
 
   if have_asan_tests
     asan_options = [
@@ -542,9 +581,16 @@ cdata.set_quoted('PACKAGE_NAME', meson.project_name())
 cdata.set_quoted('PACKAGE_VERSION', meson.project_version())
 
 cdata.set('HAVE_EGL', have_egl)
+cdata.set('HAVE_GLX', have_glx)
+cdata.set('HAVE_EGL_PLATFORM_XLIB', have_egl_xlib)
 cdata.set('HAVE_GL', have_gl)
 cdata.set('HAVE_GLES2', have_gles2)
+cdata.set('HAVE_WAYLAND', have_wayland)
 cdata.set('HAVE_XWAYLAND', have_xwayland)
+cdata.set('HAVE_X11', have_x11)
+cdata.set('HAVE_X11_CLIENT', have_x11_client)
+cdata.set('HAVE_LOGIND', true)
+cdata.set('HAVE_LIBGUDEV', true)
 cdata.set('HAVE_REMOTE_DESKTOP', have_remote_desktop)
 cdata.set('HAVE_DEVKIT', have_devkit)
 cdata.set('HAVE_GNOME_DESKTOP', have_gnome_desktop)
@@ -564,7 +610,7 @@ cdata.set('HAVE_EIS_EVENT_REF',
   libeis_dep.version().version_compare('>= 1.5.0'))
 cdata.set('HAVE_ASAN_TESTS', have_asan_tests)
 
-if have_xwayland
+if have_x11_client
   xkb_base = xkeyboard_config_dep.get_variable('xkb_base')
   cdata.set_quoted('XKB_BASE', xkb_base)
 endif
@@ -731,7 +777,9 @@ summary('Bash completion', have_bash_completion, section: 'Shell integration')
 summary('OpenGL', have_gl, section: 'Rendering APIs')
 summary('GLES2', have_gles2, section: 'Rendering APIs')
 summary('EGL', have_egl, section: 'Rendering APIs')
+summary('GLX', have_glx, section: 'Rendering APIs')
 
+summary('X11', have_x11, section: 'Options')
 summary('XWayland', have_xwayland, section: 'Options')
 summary('Remote desktop', have_remote_desktop, section: 'Options')
 summary('Development Kit', have_devkit, section: 'Options')
@@ -754,6 +802,7 @@ summary('Mutter tests', have_mutter_tests, section: 'Tests')
 summary('Cogl tests', have_cogl_tests, section: 'Tests')
 summary('Clutter tests', have_clutter_tests, section: 'Tests')
 summary('KVM tests', have_kvm_tests, section: 'Tests')
+summary('X11 backend', have_x11_tests, section: 'Tests')
 summary('Installed tests', have_installed_tests, section: 'Tests')
 summary('Testing with address sanitizer', have_asan_tests, section: 'Tests')
 summary('Coverage', get_option('b_coverage'), section: 'Tests')

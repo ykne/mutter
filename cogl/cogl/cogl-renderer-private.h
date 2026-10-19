@@ -41,3 +41,20 @@ void cogl_renderer_set_driver (CoglRenderer *renderer,
                                CoglDriver   *driver);
 
 void cogl_renderer_update_sync (CoglRenderer *renderer);
+
+/* Restored alongside the X11 backend: upstream dropped native-event
+ * filtering entirely when X11 support was removed.  CoglFilterReturn and
+ * cogl_renderer_handle_event() are public API (see cogl-renderer.h) since
+ * host applications like mutter call cogl_renderer_handle_event()
+ * directly; only the filter-registration pieces below are cogl-internal. */
+
+typedef CoglFilterReturn (* CoglNativeFilterFunc) (void *event,
+                                                   void *data);
+
+void _cogl_renderer_add_native_filter (CoglRenderer         *renderer,
+                                       CoglNativeFilterFunc  func,
+                                       void                 *data);
+
+void _cogl_renderer_remove_native_filter (CoglRenderer         *renderer,
+                                          CoglNativeFilterFunc  func,
+                                          void                 *data);

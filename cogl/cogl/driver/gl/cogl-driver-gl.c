@@ -61,6 +61,32 @@
 
 G_DEFINE_TYPE_WITH_PRIVATE (CoglDriverGL, cogl_driver_gl, COGL_TYPE_DRIVER);
 
+/* Drops each texture unit's "currently bound layer" reference. Safe to call
+ * more than once (once explicitly early during context teardown, then again -
+ * a no-op by then - from dispose()): a stray layer left bound here can be the
+ * last thing keeping some window's texture (e.g. a CoglTexturePixmapX11)
+ * alive, and unreffing it via dispose()'s own late cascade would run after the
+ * context's display is already cleared, which crashes. */
+static void
+cogl_driver_gl_clear_texture_units (CoglDriver *driver)
+{
+  CoglDriverGL *driver_gl = COGL_DRIVER_GL (driver);
+  CoglDriverGLPrivate *priv =
+    cogl_driver_gl_get_instance_private (driver_gl);
+  int i;
+
+  if (!priv->texture_units)
+    return;
+
+  for (i = 0; i < priv->texture_units->len; i++)
+    {
+      CoglTextureUnit *unit =
+        &g_array_index (priv->texture_units, CoglTextureUnit, i);
+
+      g_clear_object (&unit->layer);
+    }
+}
+
 static void
 cogl_driver_gl_dispose (GObject *object)
 {
@@ -76,8 +102,7 @@ cogl_driver_gl_dispose (GObject *object)
           CoglTextureUnit *unit =
             &g_array_index (priv->texture_units, CoglTextureUnit, i);
 
-          if (unit->layer)
-            g_object_unref (unit->layer);
+          g_clear_object (&unit->layer);
           g_object_unref (unit->matrix_stack);
         }
       g_clear_pointer (&priv->texture_units, g_array_unref);
@@ -464,6 +489,7 @@ cogl_driver_gl_class_init (CoglDriverGLClass *klass)
   gobject_class->dispose = cogl_driver_gl_dispose;
 
   driver_klass->context_init = cogl_driver_gl_context_init;
+  driver_klass->clear_texture_units = cogl_driver_gl_clear_texture_units;
   driver_klass->get_vendor = cogl_driver_gl_get_gl_vendor;
   driver_klass->get_graphics_reset_status = cogl_driver_gl_get_graphics_reset_status;
   driver_klass->create_framebuffer_driver = cogl_driver_gl_create_framebuffer_driver;

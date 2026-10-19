@@ -1,0 +1,365 @@
+/*
+ * Copyright (C) 2011,2013 Intel Corporation.
+ * Copyright (C) 2020 Red Hat
+ *
+ * Permission is hereby granted, free of charge, to any person
+ * obtaining a copy of this software and associated documentation
+ * files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use, copy,
+ * modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ */
+
+#include "config.h"
+
+#include "cogl/winsys/cogl-onscreen-xlib.h"
+
+#include "cogl/cogl-context-private.h"
+#include "cogl/cogl-display-egl.h"
+#include "cogl/cogl-framebuffer-private.h"
+#include "cogl/cogl-frame-info-private.h"
+#include "cogl/cogl-onscreen-private.h"
+#include "cogl/cogl-renderer-egl.h"
+#include "cogl/cogl-renderer-private.h"
+#include "cogl/cogl-x11-onscreen.h"
+#include "cogl/cogl-xlib-renderer-private.h"
+#include "cogl/winsys/cogl-onscreen-egl.h"
+#include "cogl/winsys/cogl-winsys-egl-x11-private.h"
+#include "mtk/mtk-x11.h"
+
+struct _CoglOnscreenXlib
+{
+  CoglOnscreenEgl parent;
+
+  Window xwin;
+};
+
+static void
+x11_onscreen_init_iface (CoglX11OnscreenInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (CoglOnscreenXlib, cogl_onscreen_xlib,
+                               COGL_TYPE_ONSCREEN_EGL,
+                               G_IMPLEMENT_INTERFACE (COGL_TYPE_X11_ONSCREEN,
+                                                      x11_onscreen_init_iface))
+
+#define COGL_ONSCREEN_X11_EVENT_MASK (StructureNotifyMask | ExposureMask)
+
+
+static Window
+create_xwindow (CoglOnscreenXlib  *onscreen_xlib,
+                EGLConfig          egl_config,
+                GError           **error)
+{
+  CoglOnscreen *onscreen = COGL_ONSCREEN (onscreen_xlib);
+  CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
+  CoglContext *context = cogl_framebuffer_get_context (framebuffer);
+  CoglDisplay *display = cogl_context_get_display (context);
+  CoglRenderer *renderer = cogl_display_get_renderer (display);
+  CoglXlibRenderer *xlib_renderer =
+    _cogl_xlib_renderer_get_data (renderer);
+  Window xwin;
+  int width;
+  int height;
+  XVisualInfo *xvisinfo;
+  XSetWindowAttributes xattr;
+  unsigned long mask;
+  int xerror;
+
+  width = cogl_framebuffer_get_width (framebuffer);
+  height = cogl_framebuffer_get_height (framebuffer);
+
+  mtk_x11_error_trap_push (xlib_renderer->xdpy);
+
+  xvisinfo = cogl_display_xlib_get_visual_info (display, egl_config);
+  if (xvisinfo == NULL)
+    {
+      g_set_error (error, COGL_WINSYS_ERROR,
+                   COGL_WINSYS_ERROR_CREATE_ONSCREEN,
+                   "Unable to retrieve the X11 visual of context's "
+                   "fbconfig");
+      mtk_x11_error_trap_pop (xlib_renderer->xdpy);
+      return None;
+    }
+
+  /* window attributes */
+  xattr.background_pixel =
+    WhitePixel (xlib_renderer->xdpy,
+                DefaultScreen (xlib_renderer->xdpy));
+  xattr.border_pixel = 0;
+  /* XXX: is this an X resource that we are leaking‽... */
+  xattr.colormap =
+    XCreateColormap (xlib_renderer->xdpy,
+                     DefaultRootWindow (xlib_renderer->xdpy),
+                     xvisinfo->visual,
+                     AllocNone);
+  xattr.event_mask = COGL_ONSCREEN_X11_EVENT_MASK;
+
+  mask = CWBorderPixel | CWColormap | CWEventMask;
+
+  xwin = XCreateWindow (xlib_renderer->xdpy,
+                        DefaultRootWindow (xlib_renderer->xdpy),
+                        0, 0,
+                        width, height,
+                        0,
+                        xvisinfo->depth,
+                        InputOutput,
+                        xvisinfo->visual,
+                        mask, &xattr);
+
+  XFree (xvisinfo);
+
+  XSync (xlib_renderer->xdpy, False);
+  xerror = mtk_x11_error_trap_pop_with_return (xlib_renderer->xdpy);
+  if (xerror)
+    {
+      char message[1000];
+      XGetErrorText (xlib_renderer->xdpy, xerror,
+                     message, sizeof (message));
+      g_set_error (error, COGL_WINSYS_ERROR,
+                   COGL_WINSYS_ERROR_CREATE_ONSCREEN,
+                   "X error while creating Window for CoglOnscreen: %s",
+                   message);
+      return None;
+    }
+
+  return xwin;
+}
+
+static gboolean
+cogl_onscreen_xlib_allocate (CoglFramebuffer  *framebuffer,
+                             GError          **error)
+{
+  CoglOnscreenXlib *onscreen_xlib = COGL_ONSCREEN_XLIB (framebuffer);
+  CoglOnscreenEgl *onscreen_egl = COGL_ONSCREEN_EGL (framebuffer);
+  CoglContext *context = cogl_framebuffer_get_context (framebuffer);
+  CoglDisplay *display = cogl_context_get_display (context);
+  CoglRenderer *renderer = cogl_display_get_renderer (display);
+  EGLDisplay edpy =
+    cogl_renderer_egl_get_edisplay (COGL_RENDERER_EGL (renderer));
+  EGLConfig egl_config =
+    cogl_display_egl_get_egl_config (COGL_DISPLAY_EGL (display));
+  Window xwin;
+  EGLSurface egl_surface;
+  CoglFramebufferClass *parent_class;
+
+  xwin = create_xwindow (onscreen_xlib, egl_config, error);
+  if (xwin == None)
+    return FALSE;
+
+  onscreen_xlib->xwin = xwin;
+
+  egl_surface =
+    eglCreateWindowSurface (edpy,
+                            egl_config,
+                            (EGLNativeWindowType) onscreen_xlib->xwin,
+                            NULL);
+  cogl_onscreen_egl_set_egl_surface (onscreen_egl,
+                                     egl_surface);
+
+  parent_class = COGL_FRAMEBUFFER_CLASS (cogl_onscreen_xlib_parent_class);
+  return parent_class->allocate (framebuffer, error);
+}
+
+static gboolean
+cogl_onscreen_xlib_get_window_handles (CoglOnscreen *onscreen,
+                                       gpointer     *device_out,
+                                       gpointer     *window_out)
+{
+  CoglOnscreenXlib *onscreen_xlib = COGL_ONSCREEN_XLIB (onscreen);
+  CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
+  CoglContext *cogl_context = cogl_framebuffer_get_context (framebuffer);
+  CoglDisplayEGL *cogl_display_egl =
+    COGL_DISPLAY_EGL (cogl_context_get_display (cogl_context));
+
+  *device_out = cogl_display_egl_get_egl_context (cogl_display_egl);
+  *window_out = (gpointer) onscreen_xlib->xwin;
+
+  return TRUE;
+}
+
+/* Unlike the native backends, X (and the EGL swap we do to it) gives no
+ * per-frame presentation feedback, so the frame is reported as synced and
+ * complete right after the swap. That has to happen from an idle rather
+ * than from inside the swap, since callers do not expect their frame
+ * callbacks to run re-entrantly from within cogl_onscreen_swap_*(). Without
+ * this Clutter's frame clock waits forever for the first frame to be
+ * presented and the stage never repaints. */
+typedef struct _FrameDone
+{
+  CoglOnscreen *onscreen;
+  CoglFrameInfo *info;
+} FrameDone;
+
+static gboolean
+notify_frame_done_cb (gpointer user_data)
+{
+  FrameDone *frame_done = user_data;
+
+  _cogl_onscreen_notify_frame_sync (frame_done->onscreen, frame_done->info);
+  _cogl_onscreen_notify_complete (frame_done->onscreen, frame_done->info);
+
+  g_object_unref (frame_done->info);
+  g_object_unref (frame_done->onscreen);
+  g_free (frame_done);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+queue_frame_done (CoglOnscreen  *onscreen,
+                  CoglFrameInfo *info)
+{
+  FrameDone *frame_done = g_new0 (FrameDone, 1);
+
+  frame_done->onscreen = g_object_ref (onscreen);
+  frame_done->info = g_object_ref (info);
+  g_idle_add_full (G_PRIORITY_DEFAULT, notify_frame_done_cb, frame_done, NULL);
+}
+
+static gboolean
+cogl_onscreen_xlib_swap_buffers_with_damage (CoglOnscreen    *onscreen,
+                                             const MtkRegion *region,
+                                             CoglFrameInfo   *info,
+                                             gpointer         user_data)
+{
+  CoglOnscreenClass *parent_class =
+    COGL_ONSCREEN_CLASS (cogl_onscreen_xlib_parent_class);
+
+  if (!parent_class->swap_buffers_with_damage (onscreen, region, info,
+                                               user_data))
+    return FALSE;
+
+  queue_frame_done (onscreen, info);
+  return TRUE;
+}
+
+static gboolean
+cogl_onscreen_xlib_swap_region (CoglOnscreen    *onscreen,
+                                const MtkRegion *region,
+                                CoglFrameInfo   *info,
+                                gpointer         user_data)
+{
+  CoglOnscreenClass *parent_class =
+    COGL_ONSCREEN_CLASS (cogl_onscreen_xlib_parent_class);
+
+  if (!parent_class->swap_region (onscreen, region, info, user_data))
+    return FALSE;
+
+  queue_frame_done (onscreen, info);
+  return TRUE;
+}
+
+static void
+cogl_onscreen_xlib_dispose (GObject *object)
+{
+  CoglOnscreenXlib *onscreen_xlib = COGL_ONSCREEN_XLIB (object);
+
+  G_OBJECT_CLASS (cogl_onscreen_xlib_parent_class)->dispose (object);
+
+  if (onscreen_xlib->xwin != None)
+    {
+      CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (object);
+      CoglContext *context = cogl_framebuffer_get_context (framebuffer);
+      CoglRenderer *renderer =
+        cogl_display_get_renderer (cogl_context_get_display (context));
+      CoglXlibRenderer *xlib_renderer =
+        _cogl_xlib_renderer_get_data (renderer);
+
+      mtk_x11_error_trap_push (xlib_renderer->xdpy);
+
+      XDestroyWindow (xlib_renderer->xdpy, onscreen_xlib->xwin);
+      onscreen_xlib->xwin = None;
+      XSync (xlib_renderer->xdpy, False);
+
+      if (mtk_x11_error_trap_pop_with_return (xlib_renderer->xdpy))
+        g_warning ("X Error while destroying X window");
+
+      onscreen_xlib->xwin = None;
+    }
+}
+
+static Window
+cogl_onscreen_xlib_get_x11_window (CoglX11Onscreen *x11_onscreen)
+{
+  CoglOnscreenXlib *onscreen_xlib = COGL_ONSCREEN_XLIB (x11_onscreen);
+
+  return onscreen_xlib->xwin;
+}
+
+gboolean
+cogl_onscreen_xlib_is_for_window (CoglOnscreen *onscreen,
+                                  Window        window)
+{
+  CoglOnscreenXlib *onscreen_xlib = COGL_ONSCREEN_XLIB (onscreen);
+
+  return onscreen_xlib->xwin == window;
+}
+
+void
+cogl_onscreen_xlib_resize (CoglOnscreen *onscreen,
+                           int           width,
+                           int           height)
+{
+  CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
+
+  cogl_framebuffer_update_size (framebuffer, width, height);
+}
+
+CoglOnscreenXlib *
+cogl_onscreen_xlib_new (CoglContext *context,
+                        int          width,
+                        int          height)
+{
+  CoglFramebufferDriverConfig driver_config;
+
+  driver_config = (CoglFramebufferDriverConfig) {
+    .type = COGL_FRAMEBUFFER_DRIVER_TYPE_BACK,
+  };
+  return g_object_new (COGL_TYPE_ONSCREEN_XLIB,
+                       "context", context,
+                       "driver-config", &driver_config,
+                       "width", width,
+                       "height", height,
+                       NULL);
+}
+
+static void
+cogl_onscreen_xlib_init (CoglOnscreenXlib *onscreen_xlib)
+{
+}
+
+static void
+x11_onscreen_init_iface (CoglX11OnscreenInterface *iface)
+{
+  iface->get_x11_window = cogl_onscreen_xlib_get_x11_window;
+}
+
+static void
+cogl_onscreen_xlib_class_init (CoglOnscreenXlibClass *klass)
+{
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+  CoglFramebufferClass *framebuffer_class = COGL_FRAMEBUFFER_CLASS (klass);
+  CoglOnscreenClass *onscreen_class = COGL_ONSCREEN_CLASS (klass);
+
+  object_class->dispose = cogl_onscreen_xlib_dispose;
+
+  framebuffer_class->allocate = cogl_onscreen_xlib_allocate;
+  onscreen_class->get_window_handles = cogl_onscreen_xlib_get_window_handles;
+  onscreen_class->swap_buffers_with_damage =
+    cogl_onscreen_xlib_swap_buffers_with_damage;
+  onscreen_class->swap_region = cogl_onscreen_xlib_swap_region;
+}

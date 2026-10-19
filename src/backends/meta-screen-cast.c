@@ -69,10 +69,8 @@ get_render_device (MetaScreenCast *screen_cast)
     clutter_backend_get_cogl_context (clutter_backend);
   CoglRenderer *cogl_renderer =
     cogl_context_get_renderer (cogl_context);
-  MetaRendererNativeGpuData *renderer_gpu_data =
-    meta_renderer_egl_get_renderer_gpu_data (META_RENDERER_EGL (cogl_renderer));
 
-  return renderer_gpu_data->render_device;
+  return meta_renderer_egl_find_render_device (cogl_renderer);
 }
 
 gboolean
@@ -86,20 +84,27 @@ meta_screen_cast_get_preferred_modifier (MetaScreenCast  *screen_cast,
   MetaBackend *backend =
     meta_screen_cast_get_backend (screen_cast);
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
-  MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
-  CoglContext *cogl_context =
-    meta_renderer_native_get_cogl_context (renderer_native);
-  CoglDisplay *cogl_display = cogl_context_get_display (cogl_context);
-  CoglRenderer *cogl_renderer =
-    cogl_display_get_renderer (cogl_display);
-  MetaRenderDevice *render_device =
-    get_render_device (screen_cast);
+  MetaRenderDevice *render_device = get_render_device (screen_cast);
+  MetaRendererNative *renderer_native;
+  CoglContext *cogl_context;
+  CoglDisplay *cogl_display;
+  CoglRenderer *cogl_renderer;
   int dmabuf_fd;
   uint32_t stride;
   uint32_t offset;
   g_autoptr (GError) error = NULL;
   const MetaFormatInfo *format_info;
   gboolean use_implicit_modifier;
+
+  /* Without a render device (the X11 backend has none) there is nothing to
+   * allocate DMA buffers on. */
+  if (!render_device)
+    return FALSE;
+
+  renderer_native = META_RENDERER_NATIVE (renderer);
+  cogl_context = meta_renderer_native_get_cogl_context (renderer_native);
+  cogl_display = cogl_context_get_display (cogl_context);
+  cogl_renderer = cogl_display_get_renderer (cogl_display);
 
   format_info = meta_format_info_from_cogl_format (format);
   g_assert (format_info);
@@ -330,7 +335,8 @@ meta_screen_cast_constructed (GObject *object)
   meta_dbus_screen_cast_set_version (skeleton, META_SCREEN_CAST_API_VERSION);
 
   render_device = get_render_device (screen_cast);
-  if (meta_render_device_is_hardware_accelerated (render_device))
+  if (render_device &&
+      meta_render_device_is_hardware_accelerated (render_device))
     screen_cast->screen_cast_device = render_device;
 
   G_OBJECT_CLASS (meta_screen_cast_parent_class)->constructed (object);

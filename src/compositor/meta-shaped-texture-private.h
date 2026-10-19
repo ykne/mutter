@@ -79,3 +79,7 @@ gboolean meta_shaped_texture_should_get_via_offscreen (MetaShapedTexture *stex);
 void meta_shaped_texture_set_color_repr (MetaShapedTexture            *stex,
                                          MetaMultiTextureAlphaMode     premult,
                                          MetaMultiTextureCoefficients  coeffs);
+
+void meta_shaped_texture_set_fallback_size (MetaShapedTexture *stex,
+                                            int                fallback_width,
+                                            int                fallback_height);

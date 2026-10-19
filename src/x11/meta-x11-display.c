@@ -51,6 +51,10 @@
 #include "backends/meta-cursor-xcursor.h"
 #include "backends/meta-logical-monitor-private.h"
 #include "backends/meta-settings-private.h"
+#ifdef HAVE_X11
+#include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-cursor-tracker-x11.h"
+#endif
 #include "core/meta-workspace-manager-private.h"
 #include "core/util-private.h"
 #include "core/workspace-private.h"
@@ -137,12 +141,22 @@ stage_to_protocol (MetaX11Display *x11_display,
   MetaContext *context = meta_display_get_context (display);
   int scale = 1;
 
-  MetaWaylandCompositor *wayland_compositor =
-    meta_context_get_wayland_compositor (context);
-  MetaXWaylandManager *xwayland_manager =
-    &wayland_compositor->xwayland_manager;
+  /* Under the X11 backend there is no Wayland compositor role (see
+   * meta_context_start()), so there is no XWayland scale to read either
+   * - the X11 display already operates in real (unscaled) protocol
+   * coordinates, matching upstream's original
+   * META_COMPOSITOR_TYPE_X11 case (scale left at its default of 1). */
+#ifdef HAVE_X11
+  if (!META_IS_BACKEND_X11 (meta_context_get_backend (context)))
+#endif
+    {
+      MetaWaylandCompositor *wayland_compositor =
+        meta_context_get_wayland_compositor (context);
+      MetaXWaylandManager *xwayland_manager =
+        &wayland_compositor->xwayland_manager;
 
-  scale = meta_xwayland_get_effective_scale (xwayland_manager);
+      scale = meta_xwayland_get_effective_scale (xwayland_manager);
+    }
 
   if (protocol_x)
     *protocol_x = stage_x * scale;
@@ -201,12 +215,30 @@ update_ui_scaling_factor (MetaX11Display *x11_display)
     meta_x11_display_get_instance_private (x11_display);
   MetaBackend *backend = backend_from_x11_display (x11_display);
   MetaContext *context = meta_backend_get_context (backend);
-  MetaWaylandCompositor *wayland_compositor =
-    meta_context_get_wayland_compositor (context);
-  MetaXWaylandManager *xwayland_manager =
-    &wayland_compositor->xwayland_manager;
-  int ui_scaling_factor =
-    meta_xwayland_get_x11_ui_scaling_factor (xwayland_manager);
+  int ui_scaling_factor;
+
+  /* Matches upstream's original META_COMPOSITOR_TYPE_X11 case: no
+   * XWayland manager exists under the X11 backend (see
+   * meta_context_start()), so the UI scaling factor comes straight from
+   * MetaSettings instead. */
+#ifdef HAVE_X11
+  if (META_IS_BACKEND_X11 (backend))
+    {
+      MetaSettings *settings = meta_backend_get_settings (backend);
+
+      ui_scaling_factor = meta_settings_get_ui_scaling_factor (settings);
+    }
+  else
+#endif
+    {
+      MetaWaylandCompositor *wayland_compositor =
+        meta_context_get_wayland_compositor (context);
+      MetaXWaylandManager *xwayland_manager =
+        &wayland_compositor->xwayland_manager;
+
+      ui_scaling_factor =
+        meta_xwayland_get_x11_ui_scaling_factor (xwayland_manager);
+    }
 
   meta_dbus_x11_set_ui_scaling_factor (priv->dbus_api, ui_scaling_factor);
 }
@@ -486,6 +518,32 @@ query_xcomposite_extension (MetaX11Display *x11_display)
               x11_display->composite_event_base,
               x11_display->composite_major_version,
               x11_display->composite_minor_version);
+}
+
+static void
+query_xdamage_extension (MetaX11Display *x11_display)
+{
+  x11_display->have_damage = FALSE;
+
+  x11_display->damage_error_base = 0;
+  x11_display->damage_event_base = 0;
+
+  if (!XDamageQueryExtension (x11_display->xdisplay,
+                              &x11_display->damage_event_base,
+                              &x11_display->damage_error_base))
+    {
+      x11_display->damage_error_base = 0;
+      x11_display->damage_event_base = 0;
+    }
+  else
+    {
+      x11_display->have_damage = TRUE;
+    }
+
+  meta_topic (META_DEBUG_X11,
+              "Attempted to init Damage, found error base %d event base %d",
+              x11_display->damage_error_base,
+              x11_display->damage_event_base);
 }
 
 static void
@@ -1058,9 +1116,21 @@ static const char *
 get_display_name (MetaDisplay *display)
 {
   MetaContext *context = meta_display_get_context (display);
-  MetaWaylandCompositor *compositor =
-    meta_context_get_wayland_compositor (context);
+  MetaWaylandCompositor *compositor;
 
+#ifdef HAVE_X11
+  /* Under the X11 backend there is no XWayland to have a private display
+   * name for - a MetaWaylandCompositor object always exists regardless of
+   * backend (created unconditionally in meta_context_start()), so the
+   * compositor-not-NULL check below can't be used to detect that case. Go
+   * straight for the real $DISPLAY the X server we're actually connecting
+   * to was started on. */
+  MetaBackend *backend = meta_context_get_backend (context);
+  if (META_IS_BACKEND_X11 (backend))
+    return g_getenv ("DISPLAY");
+#endif
+
+  compositor = meta_context_get_wayland_compositor (context);
   if (compositor)
     return meta_wayland_get_private_xwayland_display_name (compositor);
   else
@@ -1221,7 +1291,10 @@ meta_x11_display_new (MetaDisplay  *display,
 
   XSynchronize (xdisplay, !!g_getenv ("MUTTER_SYNC"));
 
-  meta_xwayland_setup_xdisplay (&compositor->xwayland_manager, xdisplay);
+  /* No Wayland compositor role (and so no XWayland manager) exists
+   * under the X11 backend - see meta_context_start(). */
+  if (compositor)
+    meta_xwayland_setup_xdisplay (&compositor->xwayland_manager, xdisplay);
 
   number = DefaultScreen (xdisplay);
 
@@ -1271,6 +1344,7 @@ meta_x11_display_new (MetaDisplay  *display,
   query_xsync_extension (x11_display);
   query_xshape_extension (x11_display);
   query_xcomposite_extension (x11_display);
+  query_xdamage_extension (x11_display);
   query_xfixes_extension (x11_display);
   query_xi_extension (x11_display);
 
@@ -1596,6 +1670,33 @@ meta_x11_display_reload_cursor (MetaX11Display *x11_display)
   XDefineCursor (x11_display->xdisplay, x11_display->xroot, xcursor);
   XFlush (x11_display->xdisplay);
 
+  /* The core X cursor set above is what mutter's own compositor-side
+   * cursor sprite (under X11 CM) is ultimately derived from, via
+   * XFixesGetCursorImage() in MetaCursorTrackerX11 - but that tracker
+   * may have already cached a (now-stale) sprite captured before this
+   * XDefineCursor ever ran (see meta_cursor_tracker_x11_invalidate_cursor()'s
+   * comment). Explicitly invalidate it here, at the exact point the real
+   * cursor is known to have changed, rather than relying on an
+   * XFixesCursorNotify that may not arrive in time (or at all) during
+   * early startup. */
+#ifdef HAVE_X11
+  {
+    MetaBackend *backend = backend_from_x11_display (x11_display);
+    MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
+
+    /* Guard on the cursor tracker's own type, not the backend's - a
+     * nested X11 backend (MetaBackendX11Nested) satisfies
+     * META_IS_BACKEND_X11() too (it's a subclass) but never overrides
+     * create_cursor_tracker(), so it inherits the base MetaBackend's
+     * plain (non-X11) cursor tracker. The sibling call site in
+     * src/x11/events.c (handle_other_xevent()'s XFixesCursorNotify
+     * handling) already guards on META_IS_CURSOR_TRACKER_X11() for
+     * exactly this reason - match it here. */
+    if (META_IS_CURSOR_TRACKER_X11 (cursor_tracker))
+      meta_cursor_tracker_x11_invalidate_cursor (META_CURSOR_TRACKER_X11 (cursor_tracker));
+  }
+#endif
+
   if (xcursor)
     XFreeCursor (x11_display->xdisplay, xcursor);
 }
@@ -1642,7 +1743,26 @@ static void
 schedule_reload_x11_cursor (MetaX11Display *x11_display)
 {
   MetaDisplay *display = x11_display->display;
-  MetaLaters *laters = meta_compositor_get_laters (display->compositor);
+  MetaLaters *laters;
+
+  /* Under the X11 backend, meta_x11_display_new() runs synchronously
+   * before create_compositor() (see meta_display_new()), so
+   * display->compositor doesn't exist yet the first time this is
+   * called (from within meta_x11_display_new() itself, via
+   * update_cursor_theme()). The meta_laters_add() deferral below only
+   * exists to avoid tearing an in-progress compositor redraw, which
+   * can't be happening before the compositor exists - and relying on
+   * prefs-change signals (the only other two call sites) to eventually
+   * apply the initial cursor is unreliable, leaving the root window
+   * cursor unset (X's default "X" glyph) for the rest of the session
+   * if neither fires. Apply it immediately here instead. */
+  if (!display->compositor)
+    {
+      meta_x11_display_reload_cursor (x11_display);
+      return;
+    }
+
+  laters = meta_compositor_get_laters (display->compositor);
 
   if (x11_display->reload_x11_cursor_later)
     return;
@@ -1659,14 +1779,31 @@ update_cursor_theme (MetaX11Display *x11_display)
 {
   MetaBackend *backend = backend_from_x11_display (x11_display);
   MetaContext *context = meta_backend_get_context (backend);
-  MetaWaylandCompositor *wayland_compositor =
-    meta_context_get_wayland_compositor (context);
-  MetaXWaylandManager *xwayland_manager =
-    &wayland_compositor->xwayland_manager;
-  int scale =
-    meta_xwayland_get_x11_ui_scaling_factor (xwayland_manager);
+  int scale;
   int size;
   const char *theme;
+
+  /* Matches update_ui_scaling_factor()'s own X11-vs-Wayland split: no
+   * XWayland manager exists under the X11 backend (see
+   * meta_context_start()), so the scale comes straight from
+   * MetaSettings instead. */
+#ifdef HAVE_X11
+  if (META_IS_BACKEND_X11 (backend))
+    {
+      MetaSettings *settings = meta_backend_get_settings (backend);
+
+      scale = meta_settings_get_ui_scaling_factor (settings);
+    }
+  else
+#endif
+    {
+      MetaWaylandCompositor *wayland_compositor =
+        meta_context_get_wayland_compositor (context);
+      MetaXWaylandManager *xwayland_manager =
+        &wayland_compositor->xwayland_manager;
+
+      scale = meta_xwayland_get_x11_ui_scaling_factor (xwayland_manager);
+    }
 
   size = meta_prefs_get_cursor_size () * scale;
 
@@ -1674,6 +1811,28 @@ update_cursor_theme (MetaX11Display *x11_display)
 
   set_cursor_theme (x11_display->xdisplay, theme, size);
   schedule_reload_x11_cursor (x11_display);
+
+  /* schedule_reload_x11_cursor() above only sets the *core* X11 cursor
+   * on the root window (the fallback for clients that don't set their
+   * own) - it says nothing to mutter's own compositor-side cursor
+   * renderer (the Clutter-composited sprite that's actually what's
+   * visible on screen under X11 CM). Without this, the composited
+   * cursor sprite stays whatever it happened to be initialized to
+   * (observed live as the plain X "X" glyph) until something else
+   * happens to force a refresh - confirmed live: a fresh login shows
+   * the wrong cursor indefinitely, but restarting the compositor
+   * (which re-initializes the cursor renderer from scratch) fixes it
+   * immediately. */
+#ifdef HAVE_X11
+  if (META_IS_BACKEND_X11 (backend))
+    {
+      MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
+
+      set_cursor_theme (meta_backend_x11_get_xdisplay (backend_x11),
+                        theme, size);
+      meta_backend_x11_reload_cursor (backend_x11);
+    }
+#endif
 }
 
 MetaWindow *
@@ -1795,12 +1954,50 @@ create_guard_window (MetaX11Display *x11_display)
   /* https://bugzilla.gnome.org/show_bug.cgi?id=710346 */
   XStoreName (x11_display->xdisplay, guard_window, "mutter guard window");
 
+#ifdef HAVE_X11
+  {
+    MetaBackend *backend = backend_from_x11_display (x11_display);
+
+    if (META_IS_BACKEND_X11 (backend))
+      {
+        MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
+        Display *backend_xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
+        unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+        XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
+
+        XISetMask (mask.mask, XI_ButtonPress);
+        XISetMask (mask.mask, XI_ButtonRelease);
+        XISetMask (mask.mask, XI_Motion);
+
+        /* Sync on the connection we created the window on to
+         * make sure it's created before we select on it on the
+         * backend connection. */
+        XSync (x11_display->xdisplay, False);
+
+        XISelectEvents (backend_xdisplay, guard_window, &mask, 1);
+      }
+  }
+#endif
+
   meta_stack_tracker_record_add (x11_display->display->stack_tracker,
                                  guard_window,
                                  create_serial);
 
   meta_stack_tracker_lower (x11_display->display->stack_tracker,
                             guard_window);
+
+  /* meta_stack_tracker_lower() above only updates mutter's internal
+   * stacking model; a newly created window is placed at the top of
+   * the real X server stack regardless, and nothing here guarantees
+   * the tracker's model gets synced/flushed to the server before
+   * this InputOnly, NoEventMask window ends up sitting on top of the
+   * (fullscreen, in the X11 CM backend) stage window - silently
+   * absorbing and dropping every core XInput2 event (clicks, key
+   * presses, crossing) aimed at the desktop, since it neither selects
+   * them itself nor has a sibling below it to fall through to.
+   * Force the real, immediate restack directly rather than relying
+   * on that model eventually getting flushed. */
+  XLowerWindow (x11_display->xdisplay, guard_window);
 
   XMapWindow (x11_display->xdisplay, guard_window);
   return guard_window;
@@ -1811,6 +2008,70 @@ meta_x11_display_create_guard_window (MetaX11Display *x11_display)
 {
   if (x11_display->guard_window == None)
     x11_display->guard_window = create_guard_window (x11_display);
+}
+
+/* Sets the input shape region of both the stage window (a child of the
+ * composite overlay window, reparented into it by meta_compositor_x11_
+ * manage()) and the composite overlay window itself (the window the
+ * compositor draws into, sitting above all client windows) to the given
+ * rectangles - an empty region (rects == NULL, n_rects == 0) makes both
+ * windows pass all input through to whatever real client window is
+ * stacked beneath them.
+ *
+ * Setting this only on the overlay window is not enough: the stage
+ * window is a CHILD of the overlay, occupying the same area, and an
+ * input shape is only a passthrough for a given window if that window
+ * itself has no claim there - the stage's own input shape, left at its
+ * default (unrestricted - claims its entire bounding rect) if never set
+ * explicitly, would keep swallowing all input regardless of what the
+ * overlay's own shape says, since input reaching the overlay's claimed
+ * area is next tested against the overlay's own child (the stage)
+ * before falling through further. Confirmed live: setting this only on
+ * the overlay left real client windows completely unable to receive
+ * any input (clicks, drags) even with an empty/passthrough overlay
+ * shape. */
+void
+meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
+                                         XRectangle      *rects,
+                                         int              n_rects)
+{
+  /* An MetaX11Display exists both under the X11 CM backend and under
+   * the native/Wayland backend (servicing Xwayland-connected clients),
+   * since this file compiles whenever have_x11_client is true - but
+   * the stage/overlay-window input-shaping this function does is only
+   * meaningful for mutter's own X11 CM compositor (meta-compositor-x11.c
+   * is its only internal caller). gnome-shell's ShellGlobal also calls
+   * this META_EXPORT function directly (see the comment on its
+   * declaration in meta-x11-display-private.h), guarded only by
+   * #ifdef HAVE_X11 and an x11_display != NULL check - neither of which
+   * rules out a real Wayland+Xwayland session, where backend is
+   * MetaBackendNative and META_BACKEND_X11() would be an invalid cast -
+   * so this is a no-op outside the X11 CM backend, not just outside
+   * HAVE_X11 builds. */
+#ifdef HAVE_X11
+  MetaBackend *backend = backend_from_x11_display (x11_display);
+  Window stage_xwindow;
+  XserverRegion region;
+
+  if (!META_IS_BACKEND_X11 (backend))
+    return;
+
+  stage_xwindow = meta_backend_x11_get_xwindow (META_BACKEND_X11 (backend));
+
+  region = XFixesCreateRegion (x11_display->xdisplay, rects, n_rects);
+  XFixesSetWindowShapeRegion (x11_display->xdisplay,
+                              stage_xwindow,
+                              ShapeInput, 0, 0, region);
+  XFixesSetWindowShapeRegion (x11_display->xdisplay,
+                              x11_display->composite_overlay_window,
+                              ShapeInput, 0, 0, region);
+
+  if (x11_display->stage_input_region != None)
+    XFixesDestroyRegion (x11_display->xdisplay,
+                         x11_display->stage_input_region);
+
+  x11_display->stage_input_region = region;
+#endif
 }
 
 static void

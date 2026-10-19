@@ -240,7 +240,7 @@ void meta_display_accelerator_activate (MetaDisplay           *display,
 void meta_display_accelerator_deactivate (MetaDisplay           *display,
                                           guint                  action,
                                           const ClutterEvent    *event);
-void meta_display_modifiers_accelerator_activate (MetaDisplay *display);
+gboolean meta_display_modifiers_accelerator_activate (MetaDisplay *display);
 
 void meta_display_update_focus_window (MetaDisplay *display,
                                        MetaWindow  *window);
@@ -322,3 +322,5 @@ void meta_display_maybe_update_sticky_mouse_focus (MetaDisplay *display);
 
 void meta_display_handle_sticky_mouse_focus_event (MetaDisplay        *display,
                                                    const ClutterEvent *event);
+
+gboolean meta_grab_op_is_keyboard (MetaGrabOp op);

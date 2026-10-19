@@ -1627,6 +1627,8 @@ static gboolean
 process_iso_next_group (MetaDisplay  *display,
                         ClutterEvent *event)
 {
+  MetaContext *context = meta_display_get_context (display);
+  MetaBackend *backend = meta_context_get_backend (context);
   MetaKeyBindingManager *keys = &display->key_binding_manager;
   uint32_t keyval = clutter_event_get_key_symbol (event);
   ClutterModifierType modifiers;
@@ -1646,7 +1648,12 @@ process_iso_next_group (MetaDisplay  *display,
     {
       if (mask == keys->iso_next_group_combos[i].mask)
         {
-          meta_display_modifiers_accelerator_activate (display);
+          /* If the signal handler returns TRUE the keyboard will
+             remain frozen. It's the signal handler's responsibility
+             to unfreeze it. */
+          if (!meta_display_modifiers_accelerator_activate (display))
+            meta_backend_unfreeze_keyboard (backend,
+                                            clutter_event_get_time (event));
           return TRUE;
         }
     }
@@ -2828,5 +2835,47 @@ meta_display_process_keybinding_event (MetaDisplay        *display,
 
     default:
       return FALSE;
+    }
+}
+
+void
+meta_display_keybinding_foreach (MetaDisplay           *display,
+                                 MetaKeyBindingForeach  func,
+                                 gpointer               user_data)
+{
+  MetaKeyBindingManager *keys = &display->key_binding_manager;
+  MetaKeyBinding *binding;
+  GHashTableIter iter;
+  int i;
+
+  if (keys->overlay_resolved_key_combo.len != 0)
+    {
+      func (display, META_KEY_BINDING_NONE,
+            &keys->overlay_resolved_key_combo, user_data);
+    }
+
+  if (keys->locate_pointer_resolved_key_combo.len != 0)
+    {
+      func (display,
+            meta_prefs_is_locate_pointer_enabled () ?
+            META_KEY_BINDING_NONE :
+            META_KEY_BINDING_NO_AUTO_GRAB,
+            &keys->locate_pointer_resolved_key_combo, user_data);
+    }
+
+  for (i = 0; i < keys->n_iso_next_group_combos; i++)
+    {
+      func (display, META_KEY_BINDING_NONE,
+            &keys->iso_next_group_combos[i], user_data);
+    }
+
+  g_hash_table_iter_init (&iter, keys->key_bindings);
+
+  while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &binding))
+    {
+      if (binding->resolved_combo.len == 0)
+        continue;
+
+      func (display, binding->flags, &binding->resolved_combo, user_data);
     }
 }

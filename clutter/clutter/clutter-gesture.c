@@ -239,6 +239,21 @@ register_sequence (ClutterGesture     *self,
   ClutterSprite *sprite = clutter_backend_get_sprite (backend, stage, event);
   GestureSequenceData *seq_data;
 
+  /* clutter_backend_get_sprite() is documented to return NULL for an
+   * event that "does not drive" a sprite - the X11 backend does this
+   * for a genuine per-sequence touch event that isn't the device's
+   * single "pointer-emulating" touch (see the identical guard in
+   * clutter_stage_update_device_for_event()/clutter_stage_emit_event()
+   * for the full explanation, and a real crash this exact NULL caused
+   * via a two-finger touchscreen pinch). clutter_gesture_handle_event()
+   * already guards its own clutter_backend_get_sprite() call the same
+   * way; this one - reachable for a real multi-touch gesture over
+   * gnome-shell's own actors, not just a real client window - was
+   * missing the same guard. There is nothing to register a sequence
+   * for in that case. */
+  if (!sprite)
+    return;
+
   g_array_set_size (priv->sequences, priv->sequences->len + 1);
   seq_data = &g_array_index (priv->sequences, GestureSequenceData, priv->sequences->len - 1);
 

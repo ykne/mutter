@@ -1,0 +1,688 @@
+/*
+ * Copyright (C) 2017 Red Hat
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 2 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+
+#include "config.h"
+
+#include "backends/x11/cm/meta-backend-x11-cm.h"
+
+#include <stdlib.h>
+#include <X11/XKBlib.h>
+#include <X11/extensions/XKBrules.h>
+#include <xkbcommon/xkbcommon-x11.h>
+
+#include "backends/meta-backend-private.h"
+#include "backends/meta-dnd-private.h"
+#include "backends/meta-keymap-description-private.h"
+#include "backends/meta-stage-private.h"
+#include "clutter/clutter-stage-private.h"
+#include "clutter/clutter-stage-window.h"
+#include "backends/x11/meta-barrier-x11.h"
+#include "backends/x11/meta-cursor-renderer-x11.h"
+#include "backends/x11/meta-cursor-tracker-x11.h"
+#include "backends/x11/meta-gpu-xrandr.h"
+#include "backends/x11/meta-input-settings-x11.h"
+#include "backends/x11/meta-monitor-manager-xrandr.h"
+#include "backends/x11/cm/meta-renderer-x11-cm.h"
+#include "compositor/meta-compositor-x11.h"
+#include "core/display-private.h"
+
+enum
+{
+  PROP_0,
+
+  PROP_DISPLAY_NAME,
+
+  N_PROPS
+};
+
+static GParamSpec *obj_props[N_PROPS];
+
+struct _MetaBackendX11Cm
+{
+  MetaBackendX11 parent;
+
+  char *display_name;
+
+  MetaCursorRenderer *cursor_renderer;
+  char *keymap_layouts;
+  char *keymap_variants;
+  char *keymap_options;
+  char *keymap_model;
+  int locked_group;
+
+  /* The exact MetaKeymapDescription last passed to set_keymap_async(),
+   * returned as-is (same pointer) from get_keymap_description(). Needed
+   * because MetaKeymapDescription::direct_equal() is a pointer-identity
+   * check: gnome-shell's KeyboardManager.isExternal() compares this
+   * against the description it applied itself, and that can only ever
+   * match if get_keymap_description() hands back the identical object
+   * rather than reconstructing an equivalent-but-distinct one from the
+   * raw rule strings below on every call. */
+  MetaKeymapDescription *keymap_description;
+
+  MetaInputSettings *input_settings;
+};
+
+G_DEFINE_FINAL_TYPE (MetaBackendX11Cm,
+                     meta_backend_x11_cm,
+                     META_TYPE_BACKEND_X11)
+
+static void
+apply_keymap (MetaBackendX11 *x11);
+
+static void
+take_touch_grab (MetaBackend *backend)
+{
+  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
+  Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+  unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+  XIEventMask mask = { META_VIRTUAL_CORE_POINTER_ID, sizeof (mask_bits), mask_bits };
+  XIGrabModifiers mods = { XIAnyModifier, 0 };
+
+  XISetMask (mask.mask, XI_TouchBegin);
+  XISetMask (mask.mask, XI_TouchUpdate);
+  XISetMask (mask.mask, XI_TouchEnd);
+
+  XIGrabTouchBegin (xdisplay, META_VIRTUAL_CORE_POINTER_ID,
+                    DefaultRootWindow (xdisplay),
+                    False, &mask, 1, &mods);
+}
+
+static void
+on_device_added (ClutterSeat        *seat,
+                 ClutterInputDevice *device,
+                 gpointer            user_data)
+{
+  MetaBackendX11 *x11 = META_BACKEND_X11 (user_data);
+
+  if (clutter_input_device_get_device_type (device) == CLUTTER_KEYBOARD_DEVICE)
+    apply_keymap (x11);
+}
+
+static gboolean
+meta_backend_x11_cm_init_basic (MetaBackend  *backend,
+                                GError      **error)
+{
+  MetaBackendClass *parent_backend_class =
+    META_BACKEND_CLASS (meta_backend_x11_cm_parent_class);
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (backend);
+  MetaGpuXrandr *gpu_xrandr;
+
+  if (x11_cm->display_name)
+    g_setenv ("DISPLAY", x11_cm->display_name, TRUE);
+
+  /*
+   * The X server deals with multiple GPUs for us, so we just see what the X
+   * server gives us as one single GPU, even though it may actually be backed
+   * by multiple.
+   */
+  gpu_xrandr = meta_gpu_xrandr_new (META_BACKEND_X11 (x11_cm));
+  meta_backend_add_gpu (backend, META_GPU (gpu_xrandr));
+
+  return parent_backend_class->init_basic (backend, error);
+}
+
+static gboolean
+meta_backend_x11_cm_init_render (MetaBackend  *backend,
+                                 GError      **error)
+{
+  MetaBackendClass *parent_backend_class =
+    META_BACKEND_CLASS (meta_backend_x11_cm_parent_class);
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (backend);
+  ClutterSeat *seat;
+
+  seat = clutter_backend_get_default_seat (meta_backend_get_clutter_backend (backend));
+  g_signal_connect_object (seat, "device-added",
+                           G_CALLBACK (on_device_added), backend, 0);
+
+  x11_cm->input_settings = g_object_new (META_TYPE_INPUT_SETTINGS_X11,
+                                         "backend", backend,
+                                         NULL);
+
+  if (!parent_backend_class->init_render (backend, error))
+    return FALSE;
+
+  take_touch_grab (backend);
+
+  return TRUE;
+}
+
+static MetaBackendCapabilities
+meta_backend_x11_cm_get_capabilities (MetaBackend *backend)
+{
+  MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
+  MetaBackendCapabilities capabilities = META_BACKEND_CAPABILITY_NONE;
+  MetaX11Barriers *barriers;
+
+  barriers = meta_backend_x11_get_barriers (backend_x11);
+  if (barriers)
+    capabilities |= META_BACKEND_CAPABILITY_BARRIERS;
+
+  return capabilities;
+}
+
+static MetaRenderer *
+meta_backend_x11_cm_create_renderer (MetaBackend *backend,
+                                     GError     **error)
+{
+  return g_object_new (META_TYPE_RENDERER_X11_CM,
+                       "backend", backend,
+                       NULL);
+}
+
+static MetaMonitorManager *
+meta_backend_x11_cm_create_monitor_manager (MetaBackend *backend,
+                                            GError     **error)
+{
+  return g_object_new (META_TYPE_MONITOR_MANAGER_XRANDR,
+                       "backend", backend,
+                       NULL);
+}
+
+static MetaCursorRenderer *
+meta_backend_x11_cm_get_cursor_renderer (MetaBackend   *backend,
+                                         ClutterSprite *sprite)
+{
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (backend);
+
+  if (!x11_cm->cursor_renderer)
+    {
+      x11_cm->cursor_renderer =
+        g_object_new (META_TYPE_CURSOR_RENDERER_X11,
+                      "backend", backend,
+                      "sprite", sprite,
+                      NULL);
+    }
+
+  return x11_cm->cursor_renderer;
+}
+
+static MetaCursorTracker *
+meta_backend_x11_cm_create_cursor_tracker (MetaBackend *backend)
+{
+  return g_object_new (META_TYPE_CURSOR_TRACKER_X11,
+                       "backend", backend,
+                       NULL);
+}
+
+static MetaInputSettings *
+meta_backend_x11_cm_get_input_settings (MetaBackend *backend)
+{
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (backend);
+
+  return x11_cm->input_settings;
+}
+
+static void
+meta_backend_x11_cm_update_stage (MetaBackend *backend)
+{
+  ClutterActor *stage = meta_backend_get_stage (backend);
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  int width, height;
+
+  meta_stage_rebuild_views (META_STAGE (stage));
+
+  /* clutter_actor_set_size() inside meta_stage_rebuild_views() only
+   * queues a relayout; the stage's own X11 window (and its tracked
+   * xwin_width/xwin_height) only actually gets resized once a real
+   * Clutter allocation cycle runs, which depends on frame-clock
+   * timing. Resize the stage window directly and synchronously here
+   * instead - this is what used to be a bare XResizeWindow() on the
+   * same window, except going through the stage window's own resize
+   * vfunc keeps its internally tracked size in sync too, which matters
+   * for get_event_stage()'s window lookup in meta-seat-x11.c: every
+   * non-raw XInput2 event (clicks, key presses) needs the stage window
+   * to actually cover the screen, not remain at its initial tiny
+   * placeholder size. */
+  meta_monitor_manager_get_screen_size (monitor_manager, &width, &height);
+
+  /* _clutter_stage_window_resize() is clutter-internal (not
+   * CLUTTER_EXPORT-ed), so it isn't linkable from here across the
+   * clutter/backends library boundary. Its body is nothing more than
+   * a class vfunc dispatch, which we can do ourselves: the class
+   * struct and CLUTTER_TYPE_STAGE_WINDOW's GType are both public. */
+  {
+    ClutterStageWindow *stage_window =
+      _clutter_stage_get_window (CLUTTER_STAGE (stage));
+
+    if (stage_window)
+      CLUTTER_STAGE_WINDOW_GET_CLASS (stage_window)->resize (stage_window,
+                                                             width, height);
+  }
+}
+
+static void
+meta_backend_x11_cm_select_stage_events (MetaBackend *backend)
+{
+  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
+  Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+  Window xwin = meta_backend_x11_get_xwindow (x11);
+  unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
+  XIEventMask mask = { XIAllMasterDevices, sizeof (mask_bits), mask_bits };
+
+  XISetMask (mask.mask, XI_KeyPress);
+  XISetMask (mask.mask, XI_KeyRelease);
+  XISetMask (mask.mask, XI_ButtonPress);
+  XISetMask (mask.mask, XI_ButtonRelease);
+  XISetMask (mask.mask, XI_Enter);
+  XISetMask (mask.mask, XI_Leave);
+  XISetMask (mask.mask, XI_FocusIn);
+  XISetMask (mask.mask, XI_FocusOut);
+  XISetMask (mask.mask, XI_Motion);
+
+  XISelectEvents (xdisplay, xwin, &mask, 1);
+}
+
+static void
+get_xkbrf_var_defs (Display           *xdisplay,
+                    const char        *layouts,
+                    const char        *variants,
+                    const char        *options,
+                    const char        *model,
+                    char             **rules_p,
+                    XkbRF_VarDefsRec  *var_defs)
+{
+  char *rules = NULL;
+
+  /* Get it from the X property or fallback on defaults */
+  if (!XkbRF_GetNamesProp (xdisplay, &rules, var_defs) || !rules)
+    {
+      rules = strdup (DEFAULT_XKB_RULES_FILE);
+      var_defs->model = NULL;
+      var_defs->layout = NULL;
+      var_defs->variant = NULL;
+      var_defs->options = NULL;
+    }
+
+  /* Swap in our new options... */
+  free (var_defs->layout);
+  var_defs->layout = strdup (layouts);
+  free (var_defs->variant);
+  var_defs->variant = strdup (variants);
+  free (var_defs->options);
+  var_defs->options = strdup (options);
+  free (var_defs->model);
+  var_defs->model = strdup (model);
+
+  /* Sometimes, the property is a file path, and sometimes it's
+     not. Normalize it so it's always a file path. */
+  if (rules[0] == '/')
+    *rules_p = g_strdup (rules);
+  else
+    *rules_p = g_build_filename (XKB_BASE, "rules", rules, NULL);
+
+  free (rules);
+}
+
+static void
+free_xkbrf_var_defs (XkbRF_VarDefsRec *var_defs)
+{
+  free (var_defs->model);
+  free (var_defs->layout);
+  free (var_defs->variant);
+  free (var_defs->options);
+}
+
+static void
+free_xkb_component_names (XkbComponentNamesRec *p)
+{
+  free (p->keymap);
+  free (p->keycodes);
+  free (p->types);
+  free (p->compat);
+  free (p->symbols);
+  free (p->geometry);
+}
+
+static void
+upload_xkb_description (Display              *xdisplay,
+                        const gchar          *rules_file_path,
+                        XkbRF_VarDefsRec     *var_defs,
+                        XkbComponentNamesRec *comp_names)
+{
+  XkbDescRec *xkb_desc;
+  gchar *rules_file;
+
+  /* Upload it to the X server using the same method as setxkbmap */
+  xkb_desc = XkbGetKeyboardByName (xdisplay,
+                                   XkbUseCoreKbd,
+                                   comp_names,
+                                   XkbGBN_AllComponentsMask,
+                                   XkbGBN_AllComponentsMask &
+                                   (~XkbGBN_GeometryMask), True);
+  if (!xkb_desc)
+    {
+      g_warning ("Couldn't upload new XKB keyboard description");
+      return;
+    }
+
+  XkbFreeKeyboard (xkb_desc, 0, True);
+
+  rules_file = g_path_get_basename (rules_file_path);
+
+  if (!XkbRF_SetNamesProp (xdisplay, rules_file, var_defs))
+    g_warning ("Couldn't update the XKB root window property");
+
+  g_free (rules_file);
+}
+
+static void
+apply_keymap (MetaBackendX11 *x11)
+{
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
+  Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+  XkbRF_RulesRec *xkb_rules;
+  XkbRF_VarDefsRec xkb_var_defs = { 0 };
+  char *rules_file_path;
+
+  if (!x11_cm->keymap_layouts ||
+      !x11_cm->keymap_variants ||
+      !x11_cm->keymap_options ||
+      !x11_cm->keymap_model)
+    return;
+
+  get_xkbrf_var_defs (xdisplay,
+                      x11_cm->keymap_layouts,
+                      x11_cm->keymap_variants,
+                      x11_cm->keymap_options,
+                      x11_cm->keymap_model,
+                      &rules_file_path,
+                      &xkb_var_defs);
+
+  xkb_rules = XkbRF_Load (rules_file_path, NULL, True, True);
+  if (xkb_rules)
+    {
+      XkbComponentNamesRec xkb_comp_names = { 0 };
+
+      XkbRF_GetComponents (xkb_rules, &xkb_var_defs, &xkb_comp_names);
+      upload_xkb_description (xdisplay, rules_file_path, &xkb_var_defs, &xkb_comp_names);
+
+      free_xkb_component_names (&xkb_comp_names);
+      XkbRF_Free (xkb_rules, True);
+    }
+  else
+    {
+      g_warning ("Couldn't load XKB rules");
+    }
+
+  free_xkbrf_var_defs (&xkb_var_defs);
+  g_free (rules_file_path);
+}
+
+static MetaKeymapDescription *
+meta_backend_x11_cm_get_keymap_description (MetaBackend *backend)
+{
+  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
+
+  /* If set_keymap_async() has already run at least once, hand back the
+   * exact same MetaKeymapDescription object it was given rather than
+   * building a fresh, merely rules-equivalent one - see the struct
+   * field comment on keymap_description above for why identity matters
+   * here. */
+  if (x11_cm->keymap_description)
+    return x11_cm->keymap_description;
+  else
+    {
+      Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+      XkbRF_VarDefsRec var_defs = { 0 };
+      char *rules = NULL;
+      MetaKeymapDescription *description;
+
+      /* Nothing has been explicitly set yet (e.g. right at session
+       * startup) - read whatever rules are currently active on the X
+       * server's _XKB_RULES_NAMES root window property. */
+      if (!XkbRF_GetNamesProp (xdisplay, &rules, &var_defs) || !rules)
+        {
+          var_defs.model = NULL;
+          var_defs.layout = NULL;
+          var_defs.variant = NULL;
+          var_defs.options = NULL;
+        }
+      free (rules);
+
+      description = meta_keymap_description_new_from_rules (var_defs.model,
+                                                             var_defs.layout,
+                                                             var_defs.variant,
+                                                             var_defs.options,
+                                                             NULL, NULL);
+      free_xkbrf_var_defs (&var_defs);
+
+      /* Cache this fallback description the same way set_keymap_async()
+       * caches its own, instead of handing back a fresh, never-freed
+       * object on every call: this is a (transfer none) vfunc (see
+       * meta_backend_get_keymap_description()'s doc comment) with no
+       * caller that unrefs it, so an uncached description here leaked
+       * on every call before this fix - and worse, a different pointer
+       * every time defeated the exact identity check the struct field
+       * comment above and 4437f5008 exist for, on this one code path
+       * (before the first real set_keymap_async()). Superseded the
+       * moment set_keymap_async() first runs, same as any other cached
+       * value here. */
+      x11_cm->keymap_description = description;
+
+      return x11_cm->keymap_description;
+    }
+}
+
+static void
+meta_backend_x11_cm_set_keymap_async (MetaBackend           *backend,
+                                      MetaKeymapDescription *description,
+                                      xkb_layout_index_t     layout_index,
+                                      GTask                 *task)
+{
+  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
+  Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+  const char *model = NULL, *layout = NULL, *variant = NULL, *options = NULL;
+
+  /* Retain the caller's own description object (not a copy) so
+   * get_keymap_description() can return this exact pointer back later -
+   * see the struct field comment on keymap_description above. */
+  if (x11_cm->keymap_description != description)
+    {
+      g_clear_pointer (&x11_cm->keymap_description,
+                       meta_keymap_description_unref);
+      x11_cm->keymap_description = meta_keymap_description_ref (description);
+    }
+
+  /* MetaBackendClass::set_keymap_async() used to take plain rule strings
+   * directly and be paired with a separate set_keymap_layout_group_async();
+   * both are now one call taking a MetaKeymapDescription plus the layout
+   * index together. X11's own keymap application (apply_keymap(), below)
+   * still works from raw rule strings (it pushes them to the X server via
+   * XkbRF_Load()/XkbRF_GetComponents()), so pull them back out of the
+   * description (only meaningful when it's rules-based - see
+   * meta_keymap_description_get_rules()'s comment). A description built
+   * from a sealed FD (the other possible source) has no rule strings to
+   * extract; in that case we can't reconfigure the X server's keymap this
+   * way, so just apply the layout group index and leave the base keymap
+   * as-is. */
+  if (meta_keymap_description_get_rules (description,
+                                         &model, &layout, &variant, &options))
+    {
+      g_free (x11_cm->keymap_layouts);
+      x11_cm->keymap_layouts = g_strdup (layout);
+      g_free (x11_cm->keymap_variants);
+      x11_cm->keymap_variants = g_strdup (variant);
+      g_free (x11_cm->keymap_options);
+      x11_cm->keymap_options = g_strdup (options);
+      g_free (x11_cm->keymap_model);
+      x11_cm->keymap_model = g_strdup (model);
+
+      apply_keymap (x11);
+    }
+
+  x11_cm->locked_group = layout_index;
+  XkbLockGroup (xdisplay, XkbUseCoreKbd, layout_index);
+
+  g_task_return_boolean (task, TRUE);
+  g_object_unref (task);
+}
+
+static gboolean
+meta_backend_x11_cm_handle_host_xevent (MetaBackendX11 *x11,
+                                        XEvent         *event)
+{
+  MetaBackend *backend = META_BACKEND (x11);
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (x11);
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  MetaMonitorManagerXrandr *monitor_manager_xrandr =
+    META_MONITOR_MANAGER_XRANDR (monitor_manager);
+  Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+
+  /* meta_dnd_handle_xdnd_event() (X11 XDND drag-and-drop protocol
+   * handling) doesn't exist anywhere in the current tree - not just
+   * renamed/moved, genuinely never implemented in any version we have
+   * access to. Real XDND support would need to be written from
+   * scratch; out of scope here. Basic X11 session functionality
+   * (window management, compositing) doesn't depend on it. */
+
+  if (event->type == meta_backend_x11_get_xkb_event_base (x11))
+    {
+      XkbEvent *xkb_ev = (XkbEvent *) event;
+
+      if (xkb_ev->any.device == META_VIRTUAL_CORE_KEYBOARD_ID)
+        {
+          switch (xkb_ev->any.xkb_type)
+            {
+            case XkbStateNotify:
+              if (xkb_ev->state.changed & XkbGroupLockMask)
+                {
+                  if (x11_cm->locked_group != xkb_ev->state.locked_group)
+                    XkbLockGroup (xdisplay, XkbUseCoreKbd,
+                                  x11_cm->locked_group);
+                }
+              break;
+            default:
+              break;
+            }
+        }
+    }
+
+  if (meta_monitor_manager_xrandr_handle_xevent (monitor_manager_xrandr, event))
+    return TRUE;
+
+  return FALSE;
+}
+
+static void
+meta_backend_x11_cm_translate_device_event (MetaBackendX11 *x11,
+                                            XIDeviceEvent  *device_event)
+{
+  Window stage_window = meta_backend_x11_get_xwindow (x11);
+
+  if (device_event->event != stage_window)
+    {
+      device_event->event = stage_window;
+
+      /* As an X11 compositor, the stage window is always at 0,0, so
+       * using root coordinates will give us correct stage coordinates
+       * as well... */
+      device_event->event_x = device_event->root_x;
+      device_event->event_y = device_event->root_y;
+    }
+}
+
+static void
+meta_backend_x11_cm_translate_crossing_event (MetaBackendX11 *x11,
+                                              XIEnterEvent   *enter_event)
+{
+  Window stage_window = meta_backend_x11_get_xwindow (x11);
+
+  if (enter_event->event != stage_window)
+    {
+      enter_event->event = stage_window;
+      enter_event->event_x = enter_event->root_x;
+      enter_event->event_y = enter_event->root_y;
+    }
+}
+
+static void
+meta_backend_x11_cm_set_property (GObject      *object,
+                                  guint         prop_id,
+                                  const GValue *value,
+                                  GParamSpec   *pspec)
+{
+  MetaBackendX11Cm *backend_x11_cm = META_BACKEND_X11_CM (object);
+
+  switch (prop_id)
+    {
+    case PROP_DISPLAY_NAME:
+      backend_x11_cm->display_name = g_value_dup_string (value);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+    }
+}
+
+static void
+meta_backend_x11_cm_finalize (GObject *object)
+{
+  MetaBackendX11Cm *x11_cm = META_BACKEND_X11_CM (object);
+
+  g_clear_pointer (&x11_cm->display_name, g_free);
+  g_clear_pointer (&x11_cm->keymap_description,
+                   meta_keymap_description_unref);
+
+  G_OBJECT_CLASS (meta_backend_x11_cm_parent_class)->finalize (object);
+}
+
+static void
+meta_backend_x11_cm_init (MetaBackendX11Cm *backend_x11_cm)
+{
+}
+
+static void
+meta_backend_x11_cm_class_init (MetaBackendX11CmClass *klass)
+{
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+  MetaBackendClass *backend_class = META_BACKEND_CLASS (klass);
+  MetaBackendX11Class *backend_x11_class = META_BACKEND_X11_CLASS (klass);
+
+  object_class->set_property = meta_backend_x11_cm_set_property;
+  object_class->finalize = meta_backend_x11_cm_finalize;
+
+  backend_class->init_basic = meta_backend_x11_cm_init_basic;
+  backend_class->init_render = meta_backend_x11_cm_init_render;
+  backend_class->get_capabilities = meta_backend_x11_cm_get_capabilities;
+  backend_class->create_renderer = meta_backend_x11_cm_create_renderer;
+  backend_class->create_monitor_manager = meta_backend_x11_cm_create_monitor_manager;
+  backend_class->get_cursor_renderer = meta_backend_x11_cm_get_cursor_renderer;
+  backend_class->create_cursor_tracker = meta_backend_x11_cm_create_cursor_tracker;
+  backend_class->get_input_settings = meta_backend_x11_cm_get_input_settings;
+  backend_class->update_stage = meta_backend_x11_cm_update_stage;
+  backend_class->select_stage_events = meta_backend_x11_cm_select_stage_events;
+  backend_class->set_keymap_async = meta_backend_x11_cm_set_keymap_async;
+  backend_class->get_keymap_description = meta_backend_x11_cm_get_keymap_description;
+
+  backend_x11_class->handle_host_xevent = meta_backend_x11_cm_handle_host_xevent;
+  backend_x11_class->translate_device_event = meta_backend_x11_cm_translate_device_event;
+  backend_x11_class->translate_crossing_event = meta_backend_x11_cm_translate_crossing_event;
+
+  obj_props[PROP_DISPLAY_NAME] =
+    g_param_spec_string ("display-name", NULL, NULL,
+                         NULL,
+                         G_PARAM_WRITABLE |
+                         G_PARAM_CONSTRUCT_ONLY |
+                         G_PARAM_STATIC_STRINGS);
+  g_object_class_install_properties (object_class, N_PROPS, obj_props);
+}
+

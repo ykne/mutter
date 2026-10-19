@@ -2192,3 +2192,9 @@ meta_prefs_set_force_fullscreen (gboolean whether)
 {
   force_fullscreen = whether;
 }
+
+gboolean
+meta_prefs_is_locate_pointer_enabled (void)
+{
+  return locate_pointer_is_enabled;
+}

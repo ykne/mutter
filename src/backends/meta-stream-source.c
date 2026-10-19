@@ -2119,7 +2119,6 @@ explicit_sync_supported (MetaStreamSource *source)
   CoglContext *cogl_context =
     clutter_backend_get_cogl_context (clutter_backend);
   CoglRenderer *cogl_renderer;
-  MetaRendererNativeGpuData *renderer_gpu_data;
   MetaRenderDevice *render_device;
   MetaDeviceFile *device_file;
   int drm_fd;
@@ -2129,9 +2128,10 @@ explicit_sync_supported (MetaStreamSource *source)
     return FALSE;
 
   cogl_renderer = cogl_context_get_renderer (cogl_context);
-  renderer_gpu_data =
-    meta_renderer_egl_get_renderer_gpu_data (META_RENDERER_EGL (cogl_renderer));
-  render_device = renderer_gpu_data->render_device;
+  render_device = meta_renderer_egl_find_render_device (cogl_renderer);
+  if (!render_device)
+    return FALSE;
+
   device_file = meta_render_device_get_device_file (render_device);
   if (!device_file)
     return FALSE;
@@ -2594,18 +2594,24 @@ maybe_create_syncobj (MetaStreamSource  *source,
   CoglContext *cogl_context =
     clutter_backend_get_cogl_context (clutter_backend);
   CoglRenderer *cogl_renderer = cogl_context_get_renderer (cogl_context);
-  MetaRendererNativeGpuData *renderer_gpu_data =
-    meta_renderer_egl_get_renderer_gpu_data (META_RENDERER_EGL (cogl_renderer));
-  MetaRenderDevice *render_device = renderer_gpu_data->render_device;
-  MetaDeviceFile *device_file =
-    meta_render_device_get_device_file (render_device);
-  int drm_fd = meta_device_file_get_fd (device_file);
+  MetaRenderDevice *render_device =
+    meta_renderer_egl_find_render_device (cogl_renderer);
+  MetaDeviceFile *device_file;
+  int drm_fd;
   g_autoptr (GError) local_error = NULL;
   g_autofd int syncobj_fd = -1;
   struct spa_meta_sync_timeline *sync_timeline;
   g_autoptr (MetaDrmTimeline) timeline = NULL;
   struct spa_data *acquire_data;
   struct spa_data *release_data;
+
+  /* Only reachable with a render device (see the syncobj timeline support
+   * check), but stay safe when there is none. */
+  if (!render_device)
+    return;
+
+  device_file = meta_render_device_get_device_file (render_device);
+  drm_fd = meta_device_file_get_fd (device_file);
 
   sync_timeline = spa_buffer_find_meta_data (spa_buffer,
                                              SPA_META_SyncTimeline,
@@ -3094,12 +3100,11 @@ get_render_device (MetaStreamSource *source)
   CoglContext *cogl_context =
     clutter_backend_get_cogl_context (clutter_backend);
   CoglRenderer *cogl_renderer = cogl_context_get_renderer (cogl_context);
-  MetaRendererNativeGpuData *renderer_gpu_data =
-    meta_renderer_egl_get_renderer_gpu_data (META_RENDERER_EGL (cogl_renderer));
   MetaRenderDevice *render_device;
 
-  render_device = renderer_gpu_data->render_device;
-  if (meta_render_device_is_hardware_accelerated (render_device))
+  render_device = meta_renderer_egl_find_render_device (cogl_renderer);
+  if (render_device &&
+      meta_render_device_is_hardware_accelerated (render_device))
     return render_device;
   else
     return NULL;

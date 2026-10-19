@@ -26,6 +26,7 @@
 
 #include <glib.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 
 #include "backends/meta-monitor-manager-private.h"
 #include "core/display-private.h"
@@ -161,6 +162,7 @@ struct _MetaX11Display
   int composite_major_version;
   int composite_minor_version;
   int damage_event_base;
+  int damage_error_base;
   int xfixes_event_base;
   int xfixes_error_base;
   int xinput_error_base;
@@ -219,6 +221,12 @@ void meta_x11_display_remove_alarm_filter (MetaX11Display     *x11_display,
                                            MetaX11AlarmFilter *alarm_filter);
 
 void meta_x11_display_create_guard_window (MetaX11Display *x11_display);
+
+/* meta_x11_display_set_stage_input_region() is declared, META_EXPORT-ed,
+ * in the public meta/meta-x11-display.h instead - gnome-shell's
+ * ShellGlobal needs to call it directly, and mutter builds with hidden
+ * symbol visibility by default, so a public declaration is required for
+ * that to link. */
 
 guint32 meta_x11_display_get_current_time_roundtrip (MetaX11Display *x11_display);
 

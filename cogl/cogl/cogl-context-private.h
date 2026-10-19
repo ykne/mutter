@@ -248,6 +248,8 @@ void
 cogl_context_prepend_framebuffer (CoglContext     *context,
                                   CoglFramebuffer *framebuffer);
 
+GList * cogl_context_get_framebuffers (CoglContext *context);
+
 void
 cogl_context_remove_framebuffer (CoglContext     *context,
                                  CoglFramebuffer *framebuffer);

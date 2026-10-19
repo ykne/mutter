@@ -271,6 +271,14 @@ cogl_context_dispose (GObject *object)
   g_clear_pointer (&priv->pipeline_cache, _cogl_pipeline_cache_free);
   g_clear_pointer (&priv->sampler_cache, _cogl_sampler_cache_free);
 
+  /* Drop any pipeline layers the driver still holds bound internally
+   * while the display/renderer are still valid - otherwise a texture kept
+   * alive only by one of those (e.g. a closed window's texture-from-pixmap
+   * outliving its actor) gets disposed as a late side-effect of the
+   * driver's own dispose, by which point the display below is already
+   * cleared and any X11/EGL cleanup that dispose tries to do crashes. */
+  cogl_driver_clear_texture_units (cogl_context_get_driver (context));
+
   g_clear_object (&priv->display);
 
   G_OBJECT_CLASS (cogl_context_parent_class)->dispose (object);
@@ -993,6 +1001,17 @@ cogl_context_prepend_framebuffer (CoglContext     *context,
     cogl_context_get_instance_private (context);
 
   priv->framebuffers = g_list_prepend (priv->framebuffers, framebuffer);
+}
+
+/* Restored alongside the X11 backend, whose EGL/Xlib event filter needs to map
+ * an X window back to the CoglOnscreen it belongs to. */
+GList *
+cogl_context_get_framebuffers (CoglContext *context)
+{
+  CoglContextPrivate *priv =
+    cogl_context_get_instance_private (context);
+
+  return priv->framebuffers;
 }
 
 void

@@ -25,11 +25,28 @@
 /* Defined if EGL support is enabled */
 #mesondefine HAVE_EGL
 
+/* Defined if GLX support is enabled */
+#mesondefine HAVE_GLX
+
+/* Defined if the EGL Xlib platform is enabled */
+#mesondefine HAVE_EGL_PLATFORM_XLIB
+
 /* Have GL for rendering */
 #mesondefine HAVE_GL
 
 /* Have GLES 2.0 for rendering */
 #mesondefine HAVE_GLES2
+
+/* Defined if Wayland support is enabled */
+#mesondefine HAVE_WAYLAND
+
+/* Defined if logind support is enabled (always, since the native backend
+ * and logind became unconditional upstream; still consulted by the X11 backend) */
+#mesondefine HAVE_LOGIND
+
+/* Building with gudev for device type detection (always, upstream made
+ * gudev unconditional; still consulted by the X11 backend) */
+#mesondefine HAVE_LIBGUDEV
 
 /* Building with libwacom for advanced tablet management */
 #mesondefine HAVE_LIBWACOM
@@ -39,6 +56,12 @@
 
 /* Define if you want to enable XWayland support */
 #mesondefine HAVE_XWAYLAND
+
+/* Defined if the X11 backend is enabled */
+#mesondefine HAVE_X11
+
+/* Defined if X11 client support is enabled */
+#mesondefine HAVE_X11_CLIENT
 
 /* Defined if screen cast and remote desktop support is enabled */
 #mesondefine HAVE_REMOTE_DESKTOP

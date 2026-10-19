@@ -341,16 +341,19 @@ meta_stream_get_preferred_modifier (MetaStream      *stream,
     clutter_backend_get_cogl_context (clutter_backend);
   CoglRenderer *cogl_renderer =
     cogl_context_get_renderer (cogl_context);
-  MetaRendererNativeGpuData *renderer_gpu_data =
-    meta_renderer_egl_get_renderer_gpu_data (META_RENDERER_EGL (cogl_renderer));
   MetaRenderDevice *render_device =
-    renderer_gpu_data->render_device;
+    meta_renderer_egl_find_render_device (cogl_renderer);
   int dmabuf_fd;
   uint32_t stride;
   uint32_t offset;
   g_autoptr (GError) error = NULL;
   const MetaFormatInfo *format_info;
   gboolean use_implicit_modifier;
+
+  /* Without a render device (the X11 backend has none) there is nothing to
+   * allocate DMA buffers on. */
+  if (!render_device)
+    return FALSE;
 
   g_assert (cogl_renderer_is_dma_buf_supported (cogl_renderer));
 

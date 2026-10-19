@@ -31,7 +31,9 @@
 #include <X11/extensions/shape.h>
 
 #include "backends/meta-cursor-tracker-private.h"
+#include "backends/x11/meta-cursor-tracker-x11.h"
 #include "cogl/cogl.h"
+#include "compositor/meta-compositor-x11.h"
 #include "core/bell.h"
 #include "core/display-private.h"
 #include "core/meta-workspace-manager-private.h"
@@ -1302,6 +1304,46 @@ handle_other_xevent (MetaX11Display *x11_display,
       return;
     }
 
+  if (event->type == (x11_display->xfixes_event_base + XFixesCursorNotify))
+    {
+      /* meta_x11_display_init() (meta-x11-display.c) selects for these
+       * via XFixesSelectCursorInput() so MetaCursorTrackerX11 stays up
+       * to date (see its own doc comment), but nothing ever actually
+       * routed the arriving events to it - meta_cursor_tracker_x11_
+       * handle_xevent() existed, fully implemented, with no caller
+       * anywhere in the tree. Without this, MetaCursorTrackerX11's
+       * cached MetaCursorSpriteXfixes is captured once (whatever the
+       * cursor happened to be at session startup, or the next 100ms
+       * poll tick to race ahead of it) and never invalidated again, so
+       * every later real per-window hover cursor change (resize edges,
+       * text-entry I-beam, etc.) never reaches the renderer at all -
+       * this is the root cause of project_edge_resize_broken.md's
+       * long-standing "cursor never visually changes shape" bug. */
+      /* This MetaX11Display (and its XFixesCursorNotify events) exists
+       * even under a Wayland session, to manage Xwayland-connected X11
+       * clients - but meta_backend_get_cursor_tracker() there returns a
+       * MetaCursorTrackerNative, not a MetaCursorTrackerX11. The
+       * unguarded cast below crashed (SIGSEGV in g_object_unref, via a
+       * garbage field read through the wrong struct layout) the first
+       * time an XFixesCursorNotify arrived in a live Wayland+Xwayland
+       * session - only ever exercised against the X11-CM backend before.
+       * Under have_x11=false builds, MetaCursorTrackerX11 doesn't exist
+       * at all (meta-cursor-tracker-x11.c is gated by plain have_x11,
+       * not have_x11_client, in src/meson.build), so this whole block is
+       * compiled out rather than just runtime-guarded. */
+#ifdef HAVE_X11
+      MetaBackend *backend =
+        meta_context_get_backend (meta_display_get_context (display));
+      MetaCursorTracker *cursor_tracker =
+        meta_backend_get_cursor_tracker (backend);
+
+      if (META_IS_CURSOR_TRACKER_X11 (cursor_tracker))
+        meta_cursor_tracker_x11_handle_xevent (META_CURSOR_TRACKER_X11 (cursor_tracker),
+                                               event);
+#endif
+      return;
+    }
+
   if (META_X11_DISPLAY_HAS_SHAPE (x11_display) &&
       event->type == (x11_display->shape_event_base + ShapeNotify))
     {
@@ -1826,7 +1868,7 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
 {
   MetaDisplay *display = x11_display->display;
   MetaContext *context = meta_display_get_context (display);
-  gboolean bypass_compositor G_GNUC_UNUSED = FALSE;
+  gboolean bypass_compositor = FALSE;
   XIEvent *input_event;
   MetaWaylandCompositor *wayland_compositor;
 
@@ -1848,9 +1890,12 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
       goto out;
     }
 
+  /* No Wayland compositor role (and so no XWayland manager) exists
+   * under the X11 backend - see meta_context_start(). */
   wayland_compositor = meta_context_get_wayland_compositor (context);
 
-  if (meta_xwayland_manager_handle_xevent (&wayland_compositor->xwayland_manager,
+  if (wayland_compositor &&
+      meta_xwayland_manager_handle_xevent (&wayland_compositor->xwayland_manager,
                                            event))
     {
       bypass_compositor = TRUE;
@@ -1895,6 +1940,24 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
       if (process_selection_clear (x11_display, event))
         goto out;
     }
+
+  /* bypass_compositor was tracked through this whole function but
+   * never actually consulted anywhere - the call that was presumably
+   * meant to gate on it, forwarding events (Damage notifications in
+   * particular) to the X11 CM backend's compositor, was missing
+   * entirely. Without it, nothing ever told the compositor that
+   * mapped/redrawn window content needed compositing: windows got
+   * managed and sized correctly, but their content (and anything else
+   * needing a repaint after the stage's own initial expose) never
+   * actually appeared on screen. See meta_compositor_x11_process_xevent()'s
+   * own handling of XDamageNotify. */
+#ifdef HAVE_X11
+  if (!bypass_compositor && META_IS_COMPOSITOR_X11 (display->compositor))
+    {
+      meta_compositor_x11_process_xevent (META_COMPOSITOR_X11 (display->compositor),
+                                          event, NULL);
+    }
+#endif
 
  out:
 

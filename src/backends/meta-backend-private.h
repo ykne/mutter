@@ -41,6 +41,18 @@
 #include "core/meta-context-private.h"
 #include "core/util-private.h"
 
+/* Restored alongside the X11 backend: upstream removed this type along
+ * with the touch-sequence accept/reject vfunc it's used for
+ * (finish_touch_sequence, below) - both are otherwise unused/uncalled
+ * dead code (X11 XInput2 touch ownership semantics have no callers
+ * anywhere in the current tree), kept only so meta-backend-x11.c's
+ * existing implementation still compiles. */
+typedef enum
+{
+  META_SEQUENCE_ACCEPTED,
+  META_SEQUENCE_REJECTED,
+} MetaSequenceState;
+
 #define DEFAULT_XKB_RULES_FILE "evdev"
 #define DEFAULT_XKB_MODEL "pc105+inet"
 
@@ -87,6 +99,29 @@ struct _MetaBackendClass
   MetaLogicalMonitor * (* get_current_logical_monitor) (MetaBackend *backend);
 
   gboolean (* is_lid_closed) (MetaBackend *backend);
+
+  gboolean (* grab_device) (MetaBackend *backend,
+                            int          device_id,
+                            uint32_t     timestamp);
+
+  gboolean (* ungrab_device) (MetaBackend *backend,
+                              int          device_id,
+                              uint32_t     timestamp);
+
+  void (* freeze_keyboard) (MetaBackend *backend,
+                            uint32_t     timestamp);
+
+  void (* unfreeze_keyboard) (MetaBackend *backend,
+                              uint32_t     timestamp);
+
+  void (* ungrab_keyboard) (MetaBackend *backend,
+                            uint32_t     timestamp);
+
+  void (* finish_touch_sequence) (MetaBackend          *backend,
+                                  ClutterEventSequence *sequence,
+                                  MetaSequenceState     state);
+
+  void (* select_stage_events) (MetaBackend *backend);
 
   void (* set_keymap_async) (MetaBackend           *backend,
                              MetaKeymapDescription *description,
@@ -173,6 +208,17 @@ void meta_backend_reset_keymap_async (MetaBackend                *backend,
 
 META_EXPORT_TEST
 gboolean meta_backend_is_lid_closed (MetaBackend *backend);
+
+gboolean meta_backend_grab_device (MetaBackend *backend,
+                                   int          device_id,
+                                   uint32_t     timestamp);
+gboolean meta_backend_ungrab_device (MetaBackend *backend,
+                                     int          device_id,
+                                     uint32_t     timestamp);
+
+void meta_backend_finish_touch_sequence (MetaBackend          *backend,
+                                         ClutterEventSequence *sequence,
+                                         MetaSequenceState     state);
 
 void meta_backend_set_client_pointer_constraint (MetaBackend *backend,
                                                  MetaPointerConstraint *constraint);

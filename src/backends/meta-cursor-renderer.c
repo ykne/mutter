@@ -645,3 +645,12 @@ meta_cursor_renderer_prepare_cursor (MetaCursorRenderer *renderer,
                              priv->current_x,
                              priv->current_y);
 }
+
+MetaBackend *
+meta_cursor_renderer_get_backend (MetaCursorRenderer *renderer)
+{
+  MetaCursorRendererPrivate *priv =
+    meta_cursor_renderer_get_instance_private (renderer);
+
+  return priv->backend;
+}

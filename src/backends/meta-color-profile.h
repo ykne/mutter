@@ -86,3 +86,7 @@ MetaColorCalibration * meta_color_calibration_new (CdIcc          *cd_icc,
                                                    const CdMat3x3 *adaptation_matrix);
 
 void meta_color_calibration_free (MetaColorCalibration *color_calibration);
+
+const uint8_t * meta_color_profile_get_data (MetaColorProfile *color_profile);
+
+size_t meta_color_profile_get_data_size (MetaColorProfile *color_profile);

@@ -117,3 +117,8 @@ meta_wayland_compositor_serial_is_later (uint32_t serial1,
 {
   return serial1 - serial2 < UINT32_MAX / 2;
 }
+
+void                    meta_wayland_compositor_update_key_state (MetaWaylandCompositor *compositor,
+                                                                 char                  *key_vector,
+                                                                  int                    key_vector_len,
+                                                                  int                    offset);
