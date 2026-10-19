@@ -7,7 +7,7 @@
 # pipeline (see github.com/ykne/GNOME-X11-specs), scoped to this package.
 
 PKG := mutter
-VERSION := 51.0
+VERSION := 51.1
 
 NEEDS_LOCAL_REPO :=
 MOCK_CHROOT ?= fedora-44-x86_64

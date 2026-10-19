@@ -19,7 +19,7 @@
 
 Name:          mutter
 Epoch:         1
-Version:       51.0
+Version:       51.1
 Release:       %autorelease
 Summary:       Window and compositing manager based on Clutter
 
