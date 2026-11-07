@@ -192,6 +192,11 @@ settings_device_set_bool_setting (MetaInputSettings  *input_settings,
                                   ConfigBoolFunc      func,
                                   gboolean            enabled)
 {
+  /* Not every backend implements every vfunc (e.g. X11 has no libinput
+   * property for the DWT timeout) */
+  if (!func)
+    return;
+
   func (input_settings, device, enabled);
 }
 
@@ -227,6 +232,9 @@ settings_device_set_double_setting (MetaInputSettings  *input_settings,
                                     ConfigDoubleFunc    func,
                                     gdouble             value)
 {
+  if (!func)
+    return;
+
   func (input_settings, device, value);
 }
 
@@ -255,6 +263,9 @@ settings_device_set_uint_setting (MetaInputSettings  *input_settings,
                                   ConfigUintFunc      func,
                                   guint               value)
 {
+  if (!func)
+    return;
+
   (func) (input_settings, device, value);
 }
 
@@ -1772,6 +1783,9 @@ update_stylus_eraserbutton (MetaInputSettings      *input_settings,
   action = g_settings_get_enum (tool_settings, "eraser-button-action");
 
   input_settings_class = META_INPUT_SETTINGS_GET_CLASS (input_settings);
+  if (!input_settings_class->set_eraser_button_action)
+    return;
+
   input_settings_class->set_eraser_button_action (input_settings, device, tool,
                                                   mode, action);
 }
